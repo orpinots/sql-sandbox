@@ -1,0 +1,2309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ERD + SQL Sandbox Workbench</title>
+
+<!-- =========================
+     SHARED BASE STYLES
+========================= -->
+<style>
+  body {
+    font-family: Segoe UI, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 20px;
+    background-color: #f4f7f6;
+  }
+  h1 {
+    color: #333;
+    border-bottom: 3px solid #2d6cff;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+  button {
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #bbb;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button.primary {
+    background:#2d6cff;
+    color:white;
+    border:none;
+  }
+  textarea {
+    font-family: monospace;
+    font-size: 13px;
+  }
+  #sqlOut {
+    height: 260px;   /* ~60% taller than 160px */
+  }
+  
+</style>
+
+<!-- =========================
+     ERD BUILDER STYLES
+========================= -->
+<style>
+  #toolbar { margin-bottom:15px; display:flex; gap:8px; flex-wrap:wrap; }
+  #layout { display:flex; gap:20px; }
+  #canvasWrap {
+    flex:1;
+    border:2px dashed #ccc;
+    padding:10px;
+    min-height:500px;
+    position:relative;
+    background:white;
+  }
+  #rightPane { width:420px; }
+
+  .entity {
+    position:absolute;
+    border:2px solid #2d6cff;
+    border-radius:6px;
+    padding:6px 10px;
+    background:#eef4ff;
+    cursor:grab;
+    min-width:130px;
+    z-index:5;
+  }
+  .entity b { font-size:18px; }
+
+  /* Weak entity: double rectangle */
+  .entity.weak-entity {
+    border-style: double;
+    border-width: 4px;
+  }
+
+  /* Only the ERD-builder SVG layer should be absolute */
+  #canvasWrap svg {
+    position:absolute;
+    top:0;
+    left:0;
+    pointer-events:none;
+    z-index:10;
+  }
+  
+  #sqlOut,
+  #mermaidOut {
+    width:100%;
+    margin-top:6px;
+    box-sizing:border-box;
+  }
+
+  /* Explicit heights */
+  #sqlOut {
+    height:260px;   /* taller SQL schema box */
+  }
+
+  #mermaidOut {
+    height:160px;   /* keep Mermaid box at original height (or adjust as you like) */
+  }
+  
+  /* Entity context menu */
+  #ctxMenu,
+  #relCtxMenu {
+    position:absolute;
+    display:none;
+    background:#fff;
+    border:1px solid #ccc;
+    border-radius:6px;
+    box-shadow:0 4px 10px rgba(0,0,0,.15);
+    z-index:1000;
+  }
+  #ctxMenu button,
+  #relCtxMenu button {
+    display:block;
+    width:100%;
+    border:none;
+    border-radius:0;
+    text-align:left;
+    padding:6px 10px;
+    background:#fff;
+  }
+  #ctxMenu button:hover,
+  #relCtxMenu button:hover { background:#eef4ff; }
+
+  .rel-hit {
+    position:absolute;
+    width:22px;
+    height:22px;
+    background:transparent;
+    cursor:pointer;
+    z-index:20;
+  }
+
+  /* ---- Modals ---- */
+  /* ---- Modals ---- */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.25);
+    display: none;       /* hidden by default */
+    z-index: 2000;
+  }
+
+  /* show the overlay, but we no longer use flex centering */
+  .modal.show {
+    display: block;
+  }
+
+  .modal-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);  /* center on screen */
+    background: #fff;
+    padding: 16px 20px;
+    border-radius: 10px;
+    min-width: 420px;
+    max-width: 640px;
+    max-height: 80vh;
+    overflow: auto;
+    box-shadow: 0 10px 25px rgba(0,0,0,.25);
+  }
+  
+  .modal-header {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:10px;
+    cursor:move;
+  }
+  .modal-header h3 { margin:0; }
+  .modal-close {
+    border:none;
+    background:transparent;
+    font-size:18px;
+    cursor:pointer;
+  }
+  .modal-footer {
+    margin-top:12px;
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+  }
+  .modal-footer button { min-width:90px; }
+  
+  #entityAttrTable,
+  #relAttrTable {
+    width:100%;
+    border-collapse:collapse;
+    margin-top:8px;
+    font-size:13px;
+  }
+  #entityAttrTable th, #entityAttrTable td,
+  #relAttrTable th,    #relAttrTable td {
+    border-bottom:1px solid #ddd;
+    padding:4px 6px;
+  }
+  #entityAttrTable th,
+  #relAttrTable th {
+    text-align:left;
+    background:#f7f7f7;
+  }
+  
+  #entityAttrTable input[type="text"] { width:100%; box-sizing:border-box; }
+  #entityAttrTable input[type="checkbox"] { transform:scale(1.1); }
+
+  /* --- Relationship edit layout & table styling --- */
+
+  #relModal .modal-content {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  /* Two nice “cards” for each side of the relationship */
+  .rel-edit-layout {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 12px;
+  }
+
+  .rel-edit-side {
+    flex: 1;
+    background: #f7f7f7;
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+
+  .rel-edit-side-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .rel-edit-side-options label {
+    display: block;
+    font-size: 13px;
+    margin: 2px 0;
+  }
+
+  /* Generic section block inside the modal */
+  .rel-section {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid #ddd;
+  }
+
+  .rel-section h4 {
+    margin: 0 0 4px;
+    font-size: 14px;
+  }
+
+  /* Relationship-attribute table */
+  #relAttrTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  #relAttrTable th,
+  #relAttrTable td {
+    border-bottom: 1px solid #eee;
+    padding: 4px 6px;
+  }
+
+  /* Light header row, normal body cells */
+  #relAttrTable th {
+    background: #f2f2f2;
+    text-align: left;
+    font-weight: 600;
+  }
+
+  #relAttrTable td {
+    background: #fff;
+  }
+
+  #relAttrTable button {
+    padding: 2px 6px;
+    font-size: 12px;
+  }
+
+  /* Ensure sandbox table colors don’t bleed into modals */
+  #entityModal table th,
+  #entityModal table td,
+  #relModal table th,
+  #relModal table td {
+    color: #333;
+  }
+  
+</style>
+
+<!-- =========================
+     SQL SANDBOX STYLES
+========================= -->
+<style>
+  .sandbox-container {
+	  width: 100%;
+	  max-width: none;
+	  margin: 30px 10px 10px 10px;   /* align with top section, full-width */
+	  background: white;
+	  padding: 25px;
+	  border-radius: 8px;
+	  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  }
+  .sandbox-container h2 {
+    margin-top:0;
+    color:#333;
+    border-bottom:2px solid #007bff;
+    padding-bottom:6px;
+  }
+  .section-header { margin-top: 10px; color: #007bff; font-weight: 600; }
+  .input-area { display: flex; gap: 20px; margin-bottom: 20px; }
+  .pane { flex: 1; min-width: 0; }
+  .pane textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    resize: none;
+    height: 260px;
+  }
+  .control-group {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  #global-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    align-items: center;
+    flex-wrap:wrap;
+  }
+  #run-schema-button { background-color: #007bff; color: white; }
+  #run-schema-button:hover { background-color: #0056b3; }
+  #run-button { background-color: #28a745; color: white; }
+  #run-button:hover { background-color: #218838; }
+  #save-schema-button, #save-query-button { background-color: #ffc107; color: #333; border-color:#cc9a05; }
+  #save-schema-button:hover, #save-query-button:hover { background-color: #e0a800; }
+  #show-table-data-button { background-color: #17a2b8; color: white; }
+  #show-table-data-button:hover { background-color: #138496; }
+  select {
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background-color: white;
+  }
+  .output-switch-group {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+  }
+  .output-switch-group button {
+    flex: 1;
+    background-color: #e9ecef;
+    color: #333;
+    border: 1px solid #ccc;
+    padding: 10px;
+    font-weight: bold;
+    font-size: 14px;
+  }
+  .output-switch-group button.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+  }
+  #output-area {
+    min-height: 320px;
+    padding: 12px;
+    border: 1px solid #ccc;
+    border-top: none;
+    background: white;
+    border-radius: 0 0 8px 8px;
+    overflow: auto;
+  }
+  #erd-container, #query-output-content { display: none; }
+  #erd-container {
+    display:block;
+    border: 1px dashed #007bff;
+    padding: 10px;
+    border-radius: 4px;
+    background-color: #e6f0ff;
+  }
+  #mermaid-diagram { text-align:left; }
+  .message-box {
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 10px;
+    font-weight: bold;
+  }
+  .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+  .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+  tr:nth-child(even) { background-color: #f2f2f2; }
+
+  .sandbox-container table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 14px;
+  }
+
+  .sandbox-container th,
+  .sandbox-container td {
+    background-color: #007bff;
+    color: white;
+  }
+
+</style>
+
+<!-- SQL.js & Mermaid for the sandbox + Mermaid preview -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+
+</head>
+<body>
+
+<h1>ERD Builder + SQL Sandbox Workbench</h1>
+
+<!-- ====================================================
+     SECTION 1: ERD BUILDER → SQL + MERMAID
+===================================================== -->
+<div id="toolbar">
+  <button onclick="addEntity()">+ Add Entity</button>
+  <button class="primary" onclick="buildSchema()">Build Schema from ERD</button>
+  <button id="toggleAttrViewBtn" onclick="toggleAttrView()">Attributes: In Box</button>
+  <button onclick="openMermaidPreview()">Open Mermaid Preview</button>
+</div>
+
+<div id="layout" style="display:block;">
+  <div id="canvasWrap">
+    <svg id="svgLayer" width="100%" height="100%"></svg>
+  </div>
+</div>
+
+<div id="outputBelow" style="margin-top:20px;">
+  <h3>Generated SQL Schema</h3>
+  <textarea id="sqlOut"></textarea>
+
+  <h3 style="margin-top:20px;">Generated Mermaid ERD Text</h3>
+  <textarea id="mermaidOut"></textarea>
+</div>
+
+<!-- Entity context menu -->
+<div id="ctxMenu">
+  <button data-act="edit">Edit Entity</button>
+  <button data-act="attr">Add Attribute</button>
+  <button data-act="rel">Add Relationship</button>
+  <button data-act="weak">Add Weak Entity</button>
+  <button data-act="del">Delete Entity</button>
+</div>
+
+<!-- Relationship context menu -->
+<div id="relCtxMenu">
+  <button data-act="editRel">Edit Relationship</button>
+  <button data-act="delRel">Delete Relationship</button>
+</div>
+
+<!-- Entity edit modal -->
+<div id="entityModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Edit Entity</h3>
+      <button class="modal-close" onclick="closeEntityModal()">✕</button>
+    </div>
+    <div>
+      <label>
+        Entity name:
+        <input type="text" id="entityNameInput" style="width:100%; box-sizing:border-box; margin-top:4px;">
+      </label>
+    </div>
+    <div style="margin-top:10px;">
+      <strong>Attributes</strong>
+      <table id="entityAttrTable">
+        <thead>
+          <tr>
+            <th style="width:32%;">Name</th>
+            <th style="width:22%;">Type</th>
+            <th>NOT NULL</th>
+            <th>UNIQUE</th>
+            <th>PK</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody id="entityAttrBody"></tbody>
+      </table>
+      <button style="margin-top:6px;" onclick="addAttrRow()">+ Add Attribute</button>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeEntityModal()">Cancel</button>
+      <button class="primary" onclick="saveEntityModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Relationship edit modal -->
+<!-- Relationship edit modal -->
+<div id="relModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Edit Relationship</h3>
+      <button class="modal-close" onclick="closeRelModal()">✕</button>
+    </div>
+
+    <!-- Name row only; everything else is injected via JS -->
+    <div style="margin-bottom:10px;">
+      <label>
+        Relationship name:
+        <input type="text" id="relNameInput"
+               style="width:100%; box-sizing:border-box; margin-top:4px;">
+      </label>
+    </div>
+
+    <!-- JS will populate this with sides, attributes, and n-ary options -->
+    <div id="relSidesPanel"></div>
+
+    <div class="modal-footer">
+      <button onclick="closeRelModal()">Cancel</button>
+      <button class="primary" onclick="saveRelModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<hr style="margin:30px 0; border:none; border-top:1px solid #ccc;">
+
+<!-- ====================================================
+     SECTION 2: SQL SANDBOX
+===================================================== -->
+<div class="sandbox-container">
+  <h2>SQL Sandbox (Backed by ERD or Custom SQL)</h2>
+
+  <div id="global-controls">
+    <button id="save-schema-button" onclick="saveSchema()">💾 Save Custom Setup</button>
+    <label for="saved-schemas">Load Setup:</label>
+    <select id="saved-schemas" onchange="loadSchema(this.value)">
+      <option value="">-- Select a Schema --</option>
+    </select>
+  </div>
+
+  <div class="input-area">
+    <div class="pane">
+      <div class="section-header">1. Database Schema & Data (CREATE/INSERT)</div>
+      <textarea id="db-script" placeholder="Enter your CREATE TABLE and INSERT statements here."></textarea>
+      <div class="control-group">
+        <button id="run-schema-button" onclick="initDb()">🔄 Run Schema</button>
+      </div>
+    </div>
+
+    <div class="pane">
+      <div class="section-header">2. SQL Query Tests (SELECT)</div>
+      <textarea id="query-input" placeholder="Enter your SELECT query here."></textarea>
+      <div class="control-group">
+        <button id="run-button" onclick="executeQuery()">▶️ Run Query</button>
+
+        <label for="table-list">Show Data:</label>
+        <select id="table-list">
+          <option value="">-- Select Table --</option>
+        </select>
+        <button id="show-table-data-button" onclick="showTableData()">📋 View</button>
+
+        <button id="save-query-button" onclick="saveQuery()">💾 Save Query</button>
+        <label for="saved-queries">Load Query:</label>
+        <select id="saved-queries" onchange="loadQuery(this.value)">
+          <option value="">-- Select a Query --</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="output-switch-group">
+    <button id="show-erd-button" class="active" onclick="switchOutputView('erd')">🖼️ Database Diagram (ERD)</button>
+    <button id="show-results-button" onclick="switchOutputView('results')">📋 Query Results</button>
+  </div>
+
+  <div id="output-area">
+    <div id="erd-container" style="display:block;">
+      <p id="erd-message">Click “Run Schema” to view the diagram.</p>
+      <div id="mermaid-diagram"></div>
+    </div>
+
+    <div id="query-output-content">
+      <div id="status-message" class="message-box success">Run a query to see the output here.</div>
+      <div id="results-table"></div>
+    </div>
+  </div>
+</div>
+
+<!-- External default schemas for sandbox (unchanged) -->
+<script src="sampleSchemas.js"></script>
+
+<!-- ====================================================
+     SCRIPT: ERD BUILDER LOGIC
+===================================================== -->
+<script>
+/* ---------- ERD state ---------- */
+	
+// === BACKEND CONFIG ===
+const BACKEND_URL = "https://erd-schema-backend.onrender.com";
+	
+const INITIAL_ERD = {
+  entities: [
+    { id:"student", name:"Student", x:60,  y:180, attributes:[
+      { name:"SSN", pk:true }, { name:"Name", pk:false }
+    ]},
+    { id:"registration", name:"Registration", x:360,y:180, attributes:[
+      { name:"SSN", pk:true }, { name:"CRN", pk:true }
+    ]},
+    { id:"course", name:"Course", x:660,y:180, attributes:[
+      { name:"CRN", pk:true }, { name:"CourseName", pk:false }
+    ]}
+  ],
+  relationships: [
+    {
+      id: "r1",
+      name: "signsup",
+      type: "1:N",
+      a: "student",
+      b: "registration",
+      optA: false,  // student side not optional
+      optB: true    // registration side optional (0..*)
+    },
+    {
+      id: "r2",
+      name: "has",
+      type: "1:N",
+      a: "course",
+      b: "registration",
+      optA: false,  // course side not optional
+      optB: true    // registration side optional (0..*)
+    }
+  ]
+};
+
+let erd = JSON.parse(JSON.stringify(INITIAL_ERD));
+const wrap = document.getElementById("canvasWrap");
+const svg  = document.getElementById("svgLayer");
+const svgNS = "http://www.w3.org/2000/svg";
+
+const SQL_TYPE_OPTIONS = [
+  "INTEGER",
+  "REAL",
+  "TEXT",
+  "BOOLEAN",
+  "DATE",
+  "TIMESTAMP",
+  "DECIMAL(10,2)"
+];
+
+let showAttributeOvals = false;
+
+/* menus & modals */
+const ctxMenu = document.getElementById("ctxMenu");
+let ctxEntityId = null;
+const relCtxMenu = document.getElementById("relCtxMenu");
+let ctxRelId = null;
+
+const entityModal = document.getElementById("entityModal");
+const entityNameInput = document.getElementById("entityNameInput");
+const entityAttrBody = document.getElementById("entityAttrBody");
+let editingEntityId = null;
+
+const relModal = document.getElementById("relModal");
+const relNameInput = document.getElementById("relNameInput");
+const relSidesPanel = document.getElementById("relSidesPanel");
+let editingRelId = null;
+const relAttrBody = document.getElementById("relAttrBody");
+
+/* ---------- RENDER ---------- */
+function render() {
+  wrap.querySelectorAll(".entity").forEach(e => e.remove());
+  wrap.querySelectorAll(".rel-hit").forEach(e => e.remove());
+  svg.innerHTML = "";
+
+  erd.entities.forEach(ent => {
+    const d = document.createElement("div");
+    d.className = "entity";
+    d.style.left = ent.x + "px";
+    d.style.top  = ent.y + "px";
+    d.dataset.id = ent.id;
+    if (ent.isWeak) d.classList.add("weak-entity");
+
+    if (showAttributeOvals) {
+      d.innerHTML = `<b>${ent.name}</b>`;
+    } else {
+      d.innerHTML = `<b>${ent.name}</b><br>` +
+        ent.attributes.map(a => {
+          const tags = [];
+          if (a.pk) tags.push("PK");
+          if (a.fk) tags.push("FK");
+          const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
+          return `${a.name}${suffix}`;
+        }).join("<br>");
+    }
+
+    enableDrag(d);
+    enableContext(d);
+    wrap.appendChild(d);
+
+    ent.width  = d.offsetWidth;
+    ent.height = d.offsetHeight;
+  });
+
+  erd.relationships.forEach(r => drawRelationship(r));
+
+  if (showAttributeOvals) {
+    erd.entities.forEach(ent => drawAttributeOvalsForEntity(ent));
+  }
+}
+
+function toggleAttrView() {
+  showAttributeOvals = !showAttributeOvals;
+  const btn = document.getElementById("toggleAttrViewBtn");
+  btn.textContent = showAttributeOvals ? "Attributes: Ovals" : "Attributes: In Box";
+  render();
+}
+
+/* ---------- Relationships + Crow's Feet ---------- */
+function drawRelationship(r) {
+  const a = erd.entities.find(e => e.id === r.a);
+  const b = erd.entities.find(e => e.id === r.b);
+  if (!a || !b) return;
+
+  const extras = r.extras || [];
+  const isNAry = extras.length > 0;
+
+  const aHalfW = (a.width  || 140) / 2;
+  const aHalfH = (a.height ||  60) / 2;
+  const bHalfW = (b.width  || 140) / 2;
+  const bHalfH = (b.height ||  60) / 2;
+
+  const axCenter = a.x + aHalfW;
+  const ayCenter = a.y + aHalfH;
+  const bxCenter = b.x + bHalfW;
+  const byCenter = b.y + bHalfH;
+
+  const typeStr = (r.type || "1:1").toUpperCase();
+  const parts   = typeStr.split(":");
+  const leftCard  = (parts[0] || "1").toUpperCase();
+  const rightCard = (parts[1] || "1").toUpperCase();
+
+  // 🔑 if this is n-ary, force both primary ends to be “Many”
+  const isManyA = isNAry ? true : /[NM]/.test(leftCard);
+  const isManyB = isNAry ? true : /[NM]/.test(rightCard);
+
+  const crowMargin = 12;
+
+  let aEnd = edgePoint(axCenter, ayCenter, bxCenter, byCenter, aHalfW, aHalfH, 0);
+  let bEnd = edgePoint(bxCenter, byCenter, axCenter, ayCenter, bHalfW, bHalfH, 0);
+
+  if (isManyA) {
+    aEnd = edgePoint(axCenter, ayCenter, bxCenter, byCenter, aHalfW, aHalfH, crowMargin);
+  }
+  if (isManyB) {
+    bEnd = edgePoint(bxCenter, byCenter, axCenter, ayCenter, bHalfW, bHalfH, crowMargin);
+  }
+
+  const line = document.createElementNS(svgNS,"line");
+  line.setAttribute("x1", aEnd.x);
+  line.setAttribute("y1", aEnd.y);
+  line.setAttribute("x2", bEnd.x);
+  line.setAttribute("y2", bEnd.y);
+  line.setAttribute("stroke", "#222");
+  line.setAttribute("stroke-width", "2");
+  svg.appendChild(line);
+
+  if (isManyA) {
+    drawCrowFoot(aEnd.x, aEnd.y, bEnd.x, bEnd.y);
+  } else {
+    drawOuterOneBar(aEnd.x, aEnd.y, bEnd.x, bEnd.y);
+  }
+  if (r.optA) {
+    drawInnerCircle(aEnd.x, aEnd.y, bEnd.x, bEnd.y);
+  } else {
+    drawInnerOneBar(aEnd.x, aEnd.y, bEnd.x, bEnd.y);
+  }
+
+  // ----- B side full min/max cardinality symbols -----
+  if (isManyB) {
+    drawCrowFoot(bEnd.x, bEnd.y, aEnd.x, aEnd.y);   // max = many
+  } else {
+    drawOuterOneBar(bEnd.x, bEnd.y, aEnd.x, aEnd.y); // max = one
+  }
+
+  if (r.optB) {
+    drawInnerCircle(bEnd.x, bEnd.y, aEnd.x, aEnd.y); // min = zero (optional)
+  } else {
+    drawInnerOneBar(bEnd.x, bEnd.y, aEnd.x, aEnd.y); // min = one (mandatory)
+  }
+
+  const mx = (aEnd.x + bEnd.x) / 2;
+  const my = (aEnd.y + bEnd.y) / 2;
+
+  function drawDiamond(size) {
+    const p = document.createElementNS(svgNS, "polygon");
+    p.setAttribute("points",
+      `${mx},${my-size} ${mx+size},${my} ${mx},${my+size} ${mx-size},${my}`);
+    p.setAttribute("fill","white");
+    p.setAttribute("stroke","black");
+    svg.appendChild(p);
+  }
+
+  // 🔑 For n-ary relationships, draw extra spokes from the diamond
+  extras.forEach(extraId => {
+    const ent = erd.entities.find(e => e.id === extraId);
+    if (!ent) return;
+
+    const halfW = (ent.width  || 140) / 2;
+    const halfH = (ent.height ||  60) / 2;
+    const cx = ent.x + halfW;
+    const cy = ent.y + halfH;
+
+    // point on entity’s box edge toward the diamond
+    const entEnd = edgePoint(cx, cy, mx, my, halfW, halfH, crowMargin);
+
+    // line from diamond to entity edge
+    const lineExtra = document.createElementNS(svgNS,"line");
+    lineExtra.setAttribute("x1", mx);
+    lineExtra.setAttribute("y1", my);
+    lineExtra.setAttribute("x2", entEnd.x);
+    lineExtra.setAttribute("y2", entEnd.y);
+    lineExtra.setAttribute("stroke", "#222");
+    lineExtra.setAttribute("stroke-width", "2");
+    svg.appendChild(lineExtra);
+
+    // crow’s foot at the entity side (always “Many”)
+    drawCrowFoot(entEnd.x, entEnd.y, mx, my);
+  });
+
+  if (r.identifying) {
+    drawDiamond(11);
+    drawDiamond(7);
+  } else {
+    drawDiamond(8);
+  }
+
+  const label = document.createElementNS(svgNS,"text");
+  label.setAttribute("x", mx + 10);
+  label.setAttribute("y", my - 10);
+  label.textContent = r.name;
+  svg.appendChild(label);
+
+  // 🔑 Relationship attribute ovals (if any)
+  const relAttrs = r.attributes || [];
+  if (relAttrs.length) {
+    const rx = 38, ry = 14;
+    const gap = 45;           // distance from diamond
+    const vSpacing = 32;
+    const startY = my - gap - ((relAttrs.length - 1) * vSpacing) / 2;
+
+    relAttrs.forEach((a, idx) => {
+      const ay = startY + idx * vSpacing;
+
+      // connector line
+      const connector = document.createElementNS(svgNS, "line");
+      connector.setAttribute("x1", mx);
+      connector.setAttribute("y1", my);
+      connector.setAttribute("x2", mx);
+      connector.setAttribute("y2", ay > my ? ay - ry : ay + ry);
+      connector.setAttribute("stroke", "#222");
+      connector.setAttribute("stroke-width", "1.3");
+      svg.appendChild(connector);
+
+      // ellipse
+      const ell = document.createElementNS(svgNS, "ellipse");
+      ell.setAttribute("cx", mx);
+      ell.setAttribute("cy", ay);
+      ell.setAttribute("rx", rx);
+      ell.setAttribute("ry", ry);
+      ell.setAttribute("fill", "#fff");
+      ell.setAttribute("stroke", "#222");
+      svg.appendChild(ell);
+
+      // text
+      const t = document.createElementNS(svgNS, "text");
+      t.setAttribute("x", mx);
+      t.setAttribute("y", ay + 4);
+      t.setAttribute("text-anchor", "middle");
+      t.style.fontSize = "12px";
+      t.textContent = a.name;
+      svg.appendChild(t);
+    });
+  }
+  
+  const hit = document.createElement("div");
+  hit.className = "rel-hit";
+  hit.style.left = (mx - 11) + "px";
+  hit.style.top  = (my - 11) + "px";
+  hit.dataset.rid = r.id;
+  enableRelContext(hit);
+  wrap.appendChild(hit);
+}
+
+function drawAttributeOvalsForEntity(ent) {
+  const halfW = (ent.width  || 140) / 2;
+  const halfH = (ent.height ||  60) / 2;
+
+  const centerX = ent.x + halfW;
+  const centerY = ent.y + halfH;
+
+  const attrs = ent.attributes;
+  if (!attrs.length) return;
+
+  const rx = 40, ry = 16;
+  const side = -1;
+  const gapFromBox = 40;
+  const xPos = centerX + side * (halfW + gapFromBox + rx);
+  const verticalSpacing = 40;
+  const startY = centerY - ((attrs.length - 1) * verticalSpacing) / 2;
+
+  attrs.forEach((a, i) => {
+    const ay = startY + i * verticalSpacing;
+    const edge = edgePoint(centerX, centerY, xPos, ay, halfW, halfH, 0);
+
+    const line = document.createElementNS(svgNS,"line");
+    line.setAttribute("x1", edge.x);
+    line.setAttribute("y1", edge.y);
+    line.setAttribute("x2", xPos);
+    line.setAttribute("y2", ay);
+    line.setAttribute("stroke","#222");
+    line.setAttribute("stroke-width","1.3");
+    svg.appendChild(line);
+
+    const ell = document.createElementNS(svgNS,"ellipse");
+    ell.setAttribute("cx", xPos);
+    ell.setAttribute("cy", ay);
+    ell.setAttribute("rx", rx);
+    ell.setAttribute("ry", ry);
+    ell.setAttribute("fill","#fff");
+    ell.setAttribute("stroke","#222");
+    svg.appendChild(ell);
+
+    const text = document.createElementNS(svgNS,"text");
+    text.setAttribute("x", xPos);
+    text.setAttribute("y", ay + 4);
+    text.setAttribute("text-anchor","middle");
+    text.style.fontSize = "12px";
+
+    const tags = [];
+    if (a.pk) tags.push("PK");
+    if (a.fk) tags.push("FK");
+    const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
+    const labelText = `${a.name}${suffix}`;
+    text.textContent = labelText;
+    svg.appendChild(text);
+
+    if (a.pk) {
+      text.setAttribute("font-weight","bold");
+      const underline = document.createElementNS(svgNS,"line");
+      const textWidthApprox = labelText.length * 3.5;
+      underline.setAttribute("x1", xPos - textWidthApprox);
+      underline.setAttribute("x2", xPos + textWidthApprox);
+      underline.setAttribute("y1", ay + 7);
+      underline.setAttribute("y2", ay + 7);
+      underline.setAttribute("stroke","#222");
+      underline.setAttribute("stroke-width","1");
+      svg.appendChild(underline);
+    }
+  });
+}
+
+function edgePoint(cx, cy, otherX, otherY, halfW, halfH, extra) {
+  const dx  = otherX - cx;
+  const dy  = otherY - cy;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const ux  = dx / len;
+  const uy  = dy / len;
+
+  let tx = Infinity, ty = Infinity;
+  if (Math.abs(ux) > 1e-6) tx = halfW / Math.abs(ux);
+  if (Math.abs(uy) > 1e-6) ty = halfH / Math.abs(uy);
+
+  const tEdge = Math.min(tx, ty);
+  const t     = tEdge + extra;
+  return { x: cx + ux * t, y: cy + uy * t };
+}
+
+function drawCrowFoot(baseX, baseY, otherX, otherY) {
+  const vx  = baseX - otherX;
+  const vy  = baseY - otherY;
+  const len = Math.sqrt(vx*vx + vy*vy) || 1;
+  const ux  = vx / len;
+  const uy  = vy / len;
+
+  const px = -uy, py = ux;
+  const branchLen = 24, spread = 12;
+
+  const tips = [
+    { ox: branchLen*ux,             oy: branchLen*uy },
+    { ox: branchLen*ux + spread*px, oy: branchLen*uy + spread*py },
+    { ox: branchLen*ux - spread*px, oy: branchLen*uy - spread*py }
+  ];
+
+  tips.forEach(tip => {
+    const l = document.createElementNS(svgNS,"line");
+    l.setAttribute("x1", baseX);
+    l.setAttribute("y1", baseY);
+    l.setAttribute("x2", baseX + tip.ox);
+    l.setAttribute("y2", baseY + tip.oy);
+    l.setAttribute("stroke","#222");
+    l.setAttribute("stroke-width","2");
+    svg.appendChild(l);
+  });
+}
+
+
+function drawInnerCircle(x, y, towardX, towardY) {
+  const r = 5;
+  const dx = towardX - x;
+  const dy = towardY - y;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const ux = dx / len, uy = dy / len;
+
+  const cx = x + ux * 10;
+  const cy = y + uy * 10;
+
+  const c = document.createElementNS(svgNS, "circle");
+  c.setAttribute("cx", cx);
+  c.setAttribute("cy", cy);
+  c.setAttribute("r", r);
+  c.setAttribute("fill", "white");
+  c.setAttribute("stroke", "#222");
+  c.setAttribute("stroke-width", "2");
+  svg.appendChild(c);
+}
+
+
+function drawInnerOneBar(x, y, towardX, towardY) {
+  const dx = towardX - x;
+  const dy = towardY - y;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const ux = dx / len, uy = dy / len;
+
+  const px = -uy, py = ux;
+
+  const cx = x + ux * 10;
+  const cy = y + uy * 10;
+
+  const bar = document.createElementNS(svgNS, "line");
+  bar.setAttribute("x1", cx - px * 6);
+  bar.setAttribute("y1", cy - py * 6);
+  bar.setAttribute("x2", cx + px * 6);
+  bar.setAttribute("y2", cy + py * 6);
+  bar.setAttribute("stroke", "#222");
+  bar.setAttribute("stroke-width", "2");
+  svg.appendChild(bar);
+}
+
+
+function drawOuterOneBar(x, y, towardX, towardY) {
+  const dx = towardX - x;
+  const dy = towardY - y;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const ux = dx / len, uy = dy / len;
+
+  const px = -uy, py = ux;
+
+  const cx = x + ux * 24;
+  const cy = y + uy * 24;
+
+  const bar = document.createElementNS(svgNS, "line");
+  bar.setAttribute("x1", cx - px * 8);
+  bar.setAttribute("y1", cy - py * 8);
+  bar.setAttribute("x2", cx + px * 8);
+  bar.setAttribute("y2", cy + py * 8);
+  bar.setAttribute("stroke", "#222");
+  bar.setAttribute("stroke-width", "2");
+  svg.appendChild(bar);
+}
+
+
+
+/* ---------- Drag entities ---------- */
+function enableDrag(el){
+  let ox,oy;
+  el.onmousedown = e => {
+    if (e.button !== 0) return;
+    ox=e.offsetX; oy=e.offsetY;
+    document.onmousemove = m => {
+      el.style.left = (m.pageX - wrap.offsetLeft - ox) + "px";
+      el.style.top  = (m.pageY - wrap.offsetTop  - oy) + "px";
+      const ent = erd.entities.find(e=>e.id===el.dataset.id);
+      ent.x = parseInt(el.style.left,10);
+      ent.y = parseInt(el.style.top,10);
+      render();
+    };
+    document.onmouseup = () => { document.onmousemove=null; };
+  };
+}
+
+/* ---------- Context menus ---------- */
+function enableContext(el){
+  el.oncontextmenu = e => {
+    e.preventDefault();
+    ctxEntityId = el.dataset.id;
+    showCtxMenu(e.pageX, e.pageY);
+  };
+  el.ondblclick = e => {
+    e.preventDefault();
+    const ent = erd.entities.find(en => en.id === el.dataset.id);
+    if (ent) openEntityModal(ent);
+  };
+}
+function showCtxMenu(x,y){
+  ctxMenu.style.left  = x + "px";
+  ctxMenu.style.top   = y + "px";
+  ctxMenu.style.display = "block";
+}
+
+function enableRelContext(el){
+  el.oncontextmenu = e => {
+    e.preventDefault();
+    ctxRelId = el.dataset.rid;
+    showRelCtxMenu(e.pageX, e.pageY);
+  };
+  el.ondblclick = e => {
+    e.preventDefault();
+    const rel = erd.relationships.find(r => r.id === el.dataset.rid);
+    if (rel) openRelModal(rel);
+  };
+}
+function showRelCtxMenu(x,y){
+  relCtxMenu.style.left  = x + "px";
+  relCtxMenu.style.top   = y + "px";
+  relCtxMenu.style.display = "block";
+}
+
+document.addEventListener("click", e => {
+  if (!ctxMenu.contains(e.target)) ctxMenu.style.display = "none";
+  if (!relCtxMenu.contains(e.target)) relCtxMenu.style.display = "none";
+});
+
+/* Entity menu actions */
+ctxMenu.addEventListener("click", e => {
+  const act = e.target.dataset.act;
+  if (!act || !ctxEntityId) return;
+  ctxMenu.style.display = "none";
+
+  const ent = erd.entities.find(en => en.id === ctxEntityId);
+  if (!ent) return;
+
+  if (act === "edit" || act === "attr") {
+    openEntityModal(ent);
+    return;
+  }
+
+  if (act === "rel") {
+    const targetName = prompt("Target entity NAME (e.g., Course):");
+    if (!targetName) { render(); return; }
+    const target = erd.entities.find(e => e.name === targetName || e.id === targetName.toLowerCase());
+    if (!target) { alert("No such entity."); render(); return; }
+    const relName = prompt("Relationship name (e.g., takes, has):") || "rel";
+    const card = (prompt("Cardinality (1:1, 1:N, N:1, M:N)", "1:N") || "1:N").toUpperCase();
+    const id = "r" + Math.random().toString(36).slice(2,7);
+    erd.relationships.push({ id, name:relName, type:card, a:ctxEntityId, b:target.id });
+    render();
+    return;
+  }
+
+  if (act === "weak") {
+    const n = prompt("Weak entity name:");
+    if (!n) return;
+
+    const parentPKs = ent.attributes
+      .filter(a => a.pk)
+      .map(a => ({
+        name: a.name,
+        pk: true,
+        fk: true,
+        type: a.type || "TEXT",
+        notNull: true
+      }));
+
+    const attrs = [...parentPKs];
+
+    const wantDisc = confirm(
+      "Add discriminator attribute(s) on the weak entity (making this a 1:M relationship)?"
+    );
+
+    if (wantDisc) {
+      const discInput = prompt(
+        "Enter discriminator attribute name(s) for the weak entity.\n" +
+        "You can enter multiple names separated by commas (e.g., SectionNumber, Term):",
+        "SectionNumber"
+      );
+      if (discInput) {
+        discInput.split(",").map(s => s.trim()).filter(Boolean).forEach(name => {
+          attrs.push({ name, pk: true, type:"TEXT", notNull:true });
+        });
+      }
+    }
+
+    const newId = n.toLowerCase();
+    erd.entities.push({
+      id: newId,
+      name: n,
+      x: ent.x + 160,
+      y: ent.y,
+      attributes: attrs,
+      isWeak: true
+    });
+
+    const defaultRelName = "identifies";
+    const relName = prompt(
+      `Name of identifying relationship between ${ent.name} and ${n}:`,
+      defaultRelName
+    ) || defaultRelName;
+
+    const relType = wantDisc ? "1:N" : "1:1";
+
+    erd.relationships.push({
+      id: "r" + Math.random().toString(36).slice(2, 7),
+      name: relName,
+      type: relType,
+      a: ent.id,
+      b: newId,
+      identifying: true,
+      parentSide: "a"
+    });
+
+    render();
+    return;
+  }
+
+  if (act === "del") {
+    if (confirm("Delete entity and its relationships?")) {
+      erd.entities = erd.entities.filter(e => e.id !== ctxEntityId);
+      erd.relationships = erd.relationships.filter(r => r.a !== ctxEntityId && r.b !== ctxEntityId);
+      render();
+    }
+  }
+});
+
+/* Relationship menu actions */
+relCtxMenu.addEventListener("click", e => {
+  const act = e.target.dataset.act;
+  if (!act || !ctxRelId) return;
+  relCtxMenu.style.display = "none";
+
+  const rel = erd.relationships.find(r => r.id === ctxRelId);
+  if (!rel) return;
+
+  if (act === "editRel") openRelModal(rel);
+
+  if (act === "delRel") {
+    if (confirm("Delete this relationship?")) {
+      erd.relationships = erd.relationships.filter(r => r.id !== ctxRelId);
+      render();
+    }
+  }
+});
+
+/* ---------- Entity modal ---------- */
+function openEntityModal(ent) {
+  editingEntityId = ent.id;
+  entityNameInput.value = ent.name;
+  entityAttrBody.innerHTML = "";
+
+  ent.attributes.forEach(a => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input type="text" value="${a.name || ""}" class="attr-name"></td>
+      <td><select class="attr-type"></select></td>
+      <td style="text-align:center;"><input type="checkbox" class="attr-nn" ${a.notNull || a.pk ? "checked" : ""}></td>
+      <td style="text-align:center;"><input type="checkbox" class="attr-uniq" ${a.unique ? "checked" : ""}></td>
+      <td style="text-align:center;"><input type="checkbox" class="attr-pk" ${a.pk ? "checked" : ""}></td>
+      <td style="text-align:center;"><button onclick="removeAttrRow(this)">✕</button></td>
+    `;
+    entityAttrBody.appendChild(tr);
+    const selectEl = tr.querySelector(".attr-type");
+    populateTypeSelect(selectEl, a.type || "TEXT");
+    attachTypeSelectHandler(selectEl);
+  });
+
+  entityModal.classList.add("show");
+}
+function closeEntityModal() {
+  editingEntityId = null;
+  entityModal.classList.remove("show");
+}
+function addAttrRow() {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" class="attr-name"></td>
+    <td><select class="attr-type"></select></td>
+    <td style="text-align:center;"><input type="checkbox" class="attr-nn"></td>
+    <td style="text-align:center;"><input type="checkbox" class="attr-uniq"></td>
+    <td style="text-align:center;"><input type="checkbox" class="attr-pk"></td>
+    <td style="text-align:center;"><button onclick="removeAttrRow(this)">✕</button></td>
+  `;
+  entityAttrBody.appendChild(tr);
+  const selectEl = tr.querySelector(".attr-type");
+  populateTypeSelect(selectEl, "TEXT");
+  attachTypeSelectHandler(selectEl);
+}
+
+function removeAttrRow(btn) {
+  const tr = btn.closest("tr");
+  tr.parentNode.removeChild(tr);
+}
+
+function addRelAttrRow(attr) {
+  const tr = document.createElement("tr");
+  const name   = attr?.name    || "";
+  const type   = attr?.type    || "TEXT";
+  const notNil = attr?.notNull || false;
+
+  tr.innerHTML = `
+    <td><input type="text" class="rel-attr-name" value="${name}"></td>
+    <td><select class="rel-attr-type"></select></td>
+    <td style="text-align:center;">
+      <input type="checkbox" class="rel-attr-nn" ${notNil ? "checked" : ""}>
+    </td>
+    <td style="text-align:center;">
+      <button onclick="removeRelAttrRow(this)">✕</button>
+    </td>
+  `;
+
+  relAttrBody.appendChild(tr);
+
+  const selectEl = tr.querySelector(".rel-attr-type");
+  populateTypeSelect(selectEl, type);
+  attachTypeSelectHandler(selectEl);
+}
+
+function removeRelAttrRow(btn) {
+  const tr = btn.closest("tr");
+  tr.parentNode.removeChild(tr);
+}
+
+
+function populateTypeSelect(selectEl, currentType) {
+  selectEl.innerHTML = "";
+  SQL_TYPE_OPTIONS.forEach(t => {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    selectEl.appendChild(opt);
+  });
+
+  if (currentType && !SQL_TYPE_OPTIONS.includes(currentType.toUpperCase())) {
+    const customOpt = document.createElement("option");
+    customOpt.value = currentType;
+    customOpt.textContent = currentType + " (custom)";
+    selectEl.appendChild(customOpt);
+  }
+
+  const customChoice = document.createElement("option");
+  customChoice.value = "__CUSTOM__";
+  customChoice.textContent = "Custom…";
+  selectEl.appendChild(customChoice);
+
+  if (currentType) {
+    const std = SQL_TYPE_OPTIONS.find(
+      t => t.toUpperCase() === currentType.toUpperCase()
+    );
+    if (std) {
+      selectEl.value = std;
+    } else {
+      selectEl.value = currentType;
+    }
+  } else {
+    selectEl.value = "TEXT";
+  }
+  selectEl.dataset.currentType = selectEl.value;
+}
+function attachTypeSelectHandler(selectEl) {
+  selectEl.addEventListener("change", () => {
+    if (selectEl.value === "__CUSTOM__") {
+      const prev = selectEl.dataset.currentType || "TEXT";
+      const input = prompt(
+        "Enter custom SQL data type (e.g., VARCHAR(20), UUID):",
+        "VARCHAR(20)"
+      );
+      if (!input) {
+        selectEl.value = prev;
+        return;
+      }
+      let existing = Array.from(selectEl.options).find(o => o.value === input);
+      if (!existing) {
+        const customOption = Array.from(selectEl.options).find(o => o.value === "__CUSTOM__");
+        const opt = document.createElement("option");
+        opt.value = input;
+        opt.textContent = input + " (custom)";
+        selectEl.insertBefore(opt, customOption);
+        existing = opt;
+      }
+      selectEl.value = input;
+      selectEl.dataset.currentType = input;
+    } else {
+      selectEl.dataset.currentType = selectEl.value;
+    }
+  });
+}
+
+function saveEntityModal() {
+  if (!editingEntityId) return;
+  const ent = erd.entities.find(e => e.id === editingEntityId);
+  if (!ent) return;
+
+  const newName = entityNameInput.value.trim();
+  if (newName) ent.name = newName;
+
+  const rows = entityAttrBody.querySelectorAll("tr");
+  const newAttrs = [];
+  rows.forEach(row => {
+    const name = row.querySelector(".attr-name").value.trim();
+    if (!name) return;
+    const type = row.querySelector(".attr-type").value.trim() || "TEXT";
+    const notNull = row.querySelector(".attr-nn").checked;
+    const unique  = row.querySelector(".attr-uniq").checked;
+    const pk      = row.querySelector(".attr-pk").checked;
+    newAttrs.push({ name, type, notNull, unique, pk });
+  });
+
+  ent.attributes = newAttrs;
+  closeEntityModal();
+  render();
+}
+
+function openRelModal(rel) {
+  editingRelId = rel.id;
+
+  const entA = erd.entities.find(e => e.id === rel.a);
+  const entB = erd.entities.find(e => e.id === rel.b);
+  if (!entA || !entB) return;
+
+  const typeParts = (rel.type || "1:1").split(":");
+  const cardA = (typeParts[0] || "1").toUpperCase();
+  const cardB = (typeParts[1] || "1").toUpperCase();
+
+  relNameInput.value = rel.name;
+
+  const isIdentifying = !!rel.identifying;
+  const disableManyA = isIdentifying && rel.parentSide === "a";
+  const disableManyB = isIdentifying && rel.parentSide === "b";
+
+  const extras = rel.extras || [];
+  const relAttrs = rel.attributes || [];
+
+  const extraOptionsHtml = erd.entities
+    .filter(e => e.id !== rel.a && e.id !== rel.b)
+    .map(e => {
+      const checked = extras.includes(e.id) ? "checked" : "";
+      return `
+        <label style="display:block; margin-bottom:2px;">
+          <input type="checkbox" class="rel-extra-entity" value="${e.id}" ${checked}>
+          ${e.name}
+        </label>`;
+    }).join("");
+
+  const attrRowsHtml = relAttrs.map((a, i) => `
+    <tr>
+      <td>
+        <input type="text" class="rel-attr-name" data-idx="${i}"
+               value="${a.name || ""}">
+      </td>
+      <td>
+        <select class="rel-attr-type" data-idx="${i}">
+          ${SQL_TYPE_OPTIONS.map(
+            t => `<option value="${t}" ${a.type === t ? "selected" : ""}>${t}</option>`
+          ).join("")}
+        </select>
+      </td>
+      <td style="text-align:center;">
+        <input type="checkbox" class="rel-attr-nn" data-idx="${i}"
+               ${a.notNull ? "checked" : ""}>
+      </td>
+      <td style="text-align:center;">
+        <button type="button" class="rel-attr-del" data-idx="${i}">✕</button>
+      </td>
+    </tr>
+  `).join("");
+
+  relSidesPanel.innerHTML = `
+    <div class="rel-edit-layout">
+      <div class="rel-edit-side">
+        <div class="rel-edit-side-title">${entA.name}</div>
+        <div class="rel-edit-side-options">
+          <label>
+            <input type="checkbox" id="relManyA"
+              ${cardA === "N" || cardA === "M" ? "checked" : ""}
+              ${disableManyA ? "disabled" : ""}>
+            Many on this side (…*)
+          </label>
+          <label>
+            <input type="checkbox" id="relOptA" ${rel.optA ? "checked" : ""}>
+            Optional on this side (0..)
+          </label>
+        </div>
+      </div>
+
+      <div class="rel-edit-side">
+        <div class="rel-edit-side-title">${entB.name}</div>
+        <div class="rel-edit-side-options">
+          <label>
+            <input type="checkbox" id="relManyB"
+              ${cardB === "N" || cardB === "M" ? "checked" : ""}
+              ${disableManyB ? "disabled" : ""}>
+            Many on this side (…*)
+          </label>
+          <label>
+            <input type="checkbox" id="relOptB" ${rel.optB ? "checked" : ""}>
+            Optional on this side (0..)
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="rel-section">
+      <h4>Relationship Attributes</h4>
+      <table id="relAttrTable">
+        <thead>
+          <tr>
+            <th style="width:40%;">Name</th>
+            <th style="width:30%;">Type</th>
+            <th style="width:15%;">NOT NULL</th>
+            <th style="width:15%;">Delete</th>
+          </tr>
+        </thead>
+        <tbody id="relAttrBody">
+          ${attrRowsHtml}
+        </tbody>
+      </table>
+      <button type="button" id="relAddAttrBtn" style="margin-top:6px;">
+        + Add Attribute
+      </button>
+    </div>
+
+    <div class="rel-section">
+      <h4>Additional entities (n-ary)</h4>
+      <div style="margin-top:4px; max-height:140px; overflow:auto;">
+        ${extraOptionsHtml || '<em>No other entities defined yet.</em>'}
+      </div>
+      <div style="font-size:12px; color:#555; margin-top:4px;">
+        If you select one or more additional entities, this becomes an n-ary
+        relationship and all ends will be treated as “Many” in the relational schema.
+      </div>
+    </div>
+  `;
+
+  // --- wire up "Add attribute" + delete buttons ---
+  const relAttrBody = relSidesPanel.querySelector("#relAttrBody");
+  const addBtn = relSidesPanel.querySelector("#relAddAttrBtn");
+
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      const idx = relAttrBody.querySelectorAll("tr").length;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>
+          <input type="text" class="rel-attr-name" data-idx="${idx}">
+        </td>
+        <td>
+          <select class="rel-attr-type" data-idx="${idx}">
+            ${SQL_TYPE_OPTIONS.map(t => `<option value="${t}">${t}</option>`).join("")}
+          </select>
+        </td>
+        <td style="text-align:center;">
+          <input type="checkbox" class="rel-attr-nn" data-idx="${idx}">
+        </td>
+        <td style="text-align:center;">
+          <button type="button" class="rel-attr-del" data-idx="${idx}">✕</button>
+        </td>
+      `;
+      relAttrBody.appendChild(tr);
+    });
+  }
+
+  relAttrBody.addEventListener("click", (ev) => {
+    if (!ev.target.classList.contains("rel-attr-del")) return;
+    const row = ev.target.closest("tr");
+    if (row) row.remove();
+  });
+
+  relModal.classList.add("show");
+}
+
+function closeRelModal() {
+  editingRelId = null;
+  relModal.classList.remove("show");
+}
+
+function saveRelModal() {
+  if (!editingRelId) return;
+  const rel = erd.relationships.find(r => r.id === editingRelId);
+  if (!rel) return;
+
+  // 1. Name
+  const name = relNameInput.value.trim();
+  if (name) rel.name = name;
+
+  // 2. Cardinalities + optional flags (guard against missing elements)
+  const manyAEl = document.getElementById("relManyA");
+  const manyBEl = document.getElementById("relManyB");
+  const optAEl  = document.getElementById("relOptA");
+  const optBEl  = document.getElementById("relOptB");
+
+  const manyA  = !!(manyAEl && manyAEl.checked);
+  const manyB  = !!(manyBEl && manyBEl.checked);
+  const optA   = !!(optAEl  && optAEl.checked);
+  const optB   = !!(optBEl  && optBEl.checked);
+
+  const normCard = c => (c ? "N" : "1");
+  rel.type = `${normCard(manyA)}:${normCard(manyB)}`;
+  rel.optA = optA;
+  rel.optB = optB;
+
+  // 3. n-ary participants (extras), if that section is present
+  if (relSidesPanel) {
+    const extraChecks = relSidesPanel.querySelectorAll(".rel-extra-entity");
+    const extras = [];
+    extraChecks.forEach(chk => {
+      if (chk.checked) extras.push(chk.value);
+    });
+    rel.extras = extras;  // may be []
+  }
+
+  // 4. Relationship attributes (if the attributes table exists)
+  const relAttrBody = document.getElementById("relAttrBody");
+  if (relAttrBody) {
+    const rows = relAttrBody.querySelectorAll("tr");
+    const attrs = [];
+
+    rows.forEach(row => {
+      const nameInput = row.querySelector(".rel-attr-name");
+      const typeSelect = row.querySelector(".rel-attr-type");
+      const nnCheck    = row.querySelector(".rel-attr-nn");
+
+      if (!nameInput || !typeSelect) return;
+
+      const attrName = nameInput.value.trim();
+      if (!attrName) return;
+
+      const attrType = (typeSelect.value || "TEXT").trim();
+      const notNull  = !!(nnCheck && nnCheck.checked);
+
+      attrs.push({ name: attrName, type: attrType, notNull });
+    });
+
+    rel.attributes = attrs;
+  }
+
+  // 5. Close + re-render
+  closeRelModal();
+  render();
+}
+
+// ---------- Helper: ensure we have a table object for each entity ----------
+function makeInitialTableMap() {
+  const tableMap = new Map();
+
+  erd.entities.forEach(ent => {
+    const cols = (ent.attributes || []).map(a => ({
+      name: a.name,
+      type: a.type || "TEXT",
+      notNull: !!(a.notNull || a.pk),
+      unique: !!a.unique,
+      pk: !!a.pk,
+      fk: !!a.fk,
+      // we don't store actual FK targets on attributes yet,
+      // but we'll add .references when we create/join FKs.
+      references: a.references || null
+    }));
+
+    tableMap.set(ent.id, {
+      id: ent.id,
+      name: ent.name,
+      cols,
+      isAssoc: false,       // will be true for auto junction tables
+      fromRelId: null
+    });
+  });
+
+  return tableMap;
+}
+
+// ---------- Helper: add FK columns for 1:N / N:1 ----------
+function addForeignKeyColumns(childTable, parentEntity, isOptionalOnChild) {
+  if (!childTable || !parentEntity) return;
+
+  const parentPKs = (parentEntity.attributes || []).filter(a => a.pk);
+  if (!parentPKs.length) {
+    // No primary key to reference; nothing to add.
+    return;
+  }
+
+  parentPKs.forEach(pkAttr => {
+    // If the child already has a column with this name, don't duplicate
+    if (childTable.cols.some(c => c.name === pkAttr.name)) {
+      return;
+    }
+
+    childTable.cols.push({
+      name: pkAttr.name,
+      type: pkAttr.type || "TEXT",
+      notNull: !isOptionalOnChild,   // optional ⇒ FK may be NULL
+      unique: false,
+      pk: false,
+      fk: true,
+      references: {
+        table: parentEntity.name,
+        column: pkAttr.name
+      }
+    });
+  });
+}
+
+// ---------- Helper: pick a unique name for a junction table ----------
+function makeAssocTableName(rel, entA, entB, existingTables) {
+  const base =
+    (rel && rel.name)
+      ? rel.name
+      : (entA.name + "_" + entB.name);
+
+  // Start with something like "Enrollment" or "StudentCourse"
+  let candidate =
+    base.charAt(0).toUpperCase() + base.slice(1);
+
+  const usedNames = new Set(
+    Array.from(existingTables.values()).map(t => t.name)
+  );
+
+  if (!usedNames.has(candidate)) return candidate;
+
+  // Fallback: add suffixes until we find a free name
+  let i = 2;
+  while (usedNames.has(candidate + "_" + i)) {
+    i++;
+  }
+  return candidate + "_" + i;
+}
+
+// ---------- Helper: add FK-based columns for M:N junction table ----------
+function addJunctionFKColumns(assocCols, ent, existingColNames) {
+  const pkAttrs = (ent.attributes || []).filter(a => a.pk);
+  if (!pkAttrs.length) return;
+
+  pkAttrs.forEach(pkAttr => {
+    let colName = pkAttr.name;
+
+    // Avoid name collisions if both sides use same PK name
+    if (existingColNames.has(colName)) {
+      colName = ent.name + "_" + pkAttr.name;
+    }
+
+    existingColNames.add(colName);
+
+    assocCols.push({
+      name: colName,
+      type: pkAttr.type || "TEXT",
+      notNull: true,
+      unique: false,
+      pk: true,       // part of composite PK of junction table
+      fk: true,
+      references: {
+        table: ent.name,
+        column: pkAttr.name
+      }
+    });
+  });
+}
+
+
+/* ---------- Add Entity ---------- */
+function addEntity(){
+  const n = prompt("Entity name:");
+  if (!n) return;
+  erd.entities.push({
+    id: n.toLowerCase(),
+    name: n,
+    x: 100,
+    y: 80,
+    attributes: []
+  });
+  render();
+}
+
+/* =========================
+   SCHEMA + MERMAID (from ERD)
+========================= */
+async function buildSchema() {
+  const sqlOut = document.getElementById("sqlOut");
+  const mermaidOut = document.getElementById("mermaidOut");
+
+  // simple guard UI
+  sqlOut.value = "-- Building schema remotely…";
+  mermaidOut.value = "erDiagram\n  %% Building schema remotely…";
+
+  try {
+    const resp = await fetch("https://erd-schema-backend.onrender.com/build-schema", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+        // if you later add an API key, you'd include it here
+      },
+      body: JSON.stringify(erdPayload)
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`HTTP ${resp.status} – ${text}`);
+    }
+
+    const data = await resp.json();
+    sqlOut.value = data.sql || "";
+    mermaidOut.value = data.mermaid || "";
+  } catch (err) {
+    console.error("buildSchema error:", err);
+    sqlOut.value = `-- Error building schema: ${err.message}`;
+    mermaidOut.value = "erDiagram\n  %% Error building schema on server.";
+  }
+}
+
+/* ---------- Draggable modals ---------- */
+function makeModalDraggable(modal) {
+  const content = modal.querySelector(".modal-content");
+  const header  = modal.querySelector(".modal-header");
+
+  let isDragging = false;
+  let startX, startY, origLeft, origTop;
+
+  function onMouseMove(ev) {
+    if (!isDragging) return;
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    content.style.left = (origLeft + dx) + "px";
+    content.style.top  = (origTop  + dy) + "px";
+  }
+
+  function onMouseUp() {
+    isDragging = false;
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+  }
+
+  header.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+
+    isDragging = true;
+
+    // current position of centered modal
+    const rect = content.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    origLeft = rect.left;
+    origTop  = rect.top;
+
+    // lock into fixed coordinates and remove the centering transform
+    content.style.position = "fixed";
+    content.style.margin   = "0";
+    content.style.left     = origLeft + "px";
+    content.style.top      = origTop  + "px";
+    content.style.transform = "none";
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  });
+}
+
+
+/* ---------- Open Mermaid Preview in new tab ---------- */
+function openMermaidPreview() {
+  const code = (document.getElementById("mermaidOut").value || "").trim();
+  if (!code) {
+    alert("No Mermaid ERD text found. Click 'Build Schema from ERD' first.");
+    return;
+  }
+
+  const escaped = code
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const w = window.open("", "_blank");
+  w.document.write(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Mermaid ERD Preview</title>
+      <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"><\/script>
+      <style>
+        body { font-family: system-ui, sans-serif; margin:20px; }
+        h2 { margin-top:0; }
+        .mermaid { border:1px dashed #007bff; padding:10px; border-radius:6px; }
+      </style>
+    </head>
+    <body>
+      <h2>ERD Diagram (Mermaid)</h2>
+      <div class="mermaid">
+${escaped}
+      </div>
+      <script>mermaid.initialize({startOnLoad:true});<\/script>
+    </body>
+    </html>
+  `);
+  w.document.close();
+}
+
+/* ---------- Init ---------- */
+makeModalDraggable(entityModal);
+makeModalDraggable(relModal);
+render();
+</script>
+
+<!-- ====================================================
+     SCRIPT: SQL SANDBOX LOGIC (unchanged except integration)
+===================================================== -->
+<script>
+let db = null;
+const MAX_SCHEMAS = 5;
+const MAX_QUERIES = 10;
+const SCHEMA_STORAGE_KEY = 'sql_sandbox_schemas';
+const QUERY_STORAGE_KEY = 'sql_sandbox_queries';
+const DEFAULT_SCHEMAS = window.DEFAULT_SCHEMAS || [];
+const defaultQuery = window.INITIAL_DEFAULT_QUERY || '';
+
+const dbScriptInput = document.getElementById('db-script');
+const queryInput = document.getElementById('query-input');
+const savedSchemasSelect = document.getElementById('saved-schemas');
+const savedQueriesSelect = document.getElementById('saved-queries');
+const tableListSelect = document.getElementById('table-list');
+const erdContainer = document.getElementById('erd-container');
+const queryOutputContent = document.getElementById('query-output-content');
+const mermaidDiagramDiv = document.getElementById('mermaid-diagram');
+const erdMessage = document.getElementById('erd-message');
+const statusMessage = document.getElementById('status-message');
+const resultsTableDiv = document.getElementById('results-table');
+const showErdButton = document.getElementById('show-erd-button');
+const showResultsButton = document.getElementById('show-results-button');
+
+const firstDefaultSchema = (DEFAULT_SCHEMAS && DEFAULT_SCHEMAS.length > 0)
+  ? DEFAULT_SCHEMAS[0]
+  : null;
+
+if (firstDefaultSchema) {
+  dbScriptInput.value = firstDefaultSchema.script;
+  queryInput.value = (window.INITIAL_DEFAULT_QUERY || firstDefaultSchema.defaultQuery || '');
+} else {
+  dbScriptInput.value = '-- Add CREATE TABLE and INSERT statements here';
+  queryInput.value = '-- SELECT * FROM your_table;';
+}
+
+loadAllSchemasList();
+loadSavedQueriesList();
+switchOutputView('erd');
+initDb();
+
+/* ------ View switcher ------ */
+function switchOutputView(view) {
+  if (view === 'erd') {
+    erdContainer.style.display = 'block';
+    queryOutputContent.style.display = 'none';
+    showErdButton.classList.add('active');
+    showResultsButton.classList.remove('active');
+  } else {
+    erdContainer.style.display = 'none';
+    queryOutputContent.style.display = 'block';
+    showErdButton.classList.remove('active');
+    showResultsButton.classList.add('active');
+  }
+}
+
+/* ------ Init DB from script ------ */
+async function initDb() {
+  resultsTableDiv.innerHTML = '';
+  switchOutputView('erd');
+  tableListSelect.innerHTML = '<option value="">-- Select Table --</option>';
+
+  try {
+    statusMessage.className = 'message-box success';
+    statusMessage.textContent = '⏳ Initializing database engine...';
+
+    const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` });
+    db = new SQL.Database();
+
+    const schemaScript = dbScriptInput.value.trim();
+    if (!schemaScript) throw new Error("Schema script cannot be empty.");
+
+    db.run(schemaScript);
+
+    statusMessage.className = 'message-box success';
+    statusMessage.textContent = '✅ Database successfully created and populated. You can now run queries.';
+
+    generateERD();
+    populateTableList();
+  } catch (err) {
+    db = null;
+    statusMessage.className = 'message-box error';
+    statusMessage.textContent = '❌ Failed to initialize database: ' + err.message;
+    console.error(err);
+    erdMessage.textContent = 'ERD generation failed due to schema errors.';
+    mermaidDiagramDiv.innerHTML = '';
+  }
+}
+
+/* ------ Query execution ------ */
+function executeQuery() {
+  switchOutputView('results');
+
+  if (!db) {
+    statusMessage.className = 'message-box error';
+    statusMessage.textContent = '❌ Database is not initialized. Click "Run Schema" first.';
+    return;
+  }
+
+  const query = queryInput.value.trim();
+  resultsTableDiv.innerHTML = '';
+  if (!query) {
+    statusMessage.className = 'message-box error';
+    statusMessage.textContent = '❌ Please enter a query.';
+    return;
+  }
+
+  try {
+    const results = db.exec(query);
+    const hasRows = results.length > 0 && results[0].values.length > 0;
+
+    if (!hasRows) {
+      statusMessage.className = 'message-box success';
+      statusMessage.textContent = '✅ Query executed successfully. No rows returned or statement did not produce a result set.';
+      resultsTableDiv.innerHTML = '';
+    } else {
+      statusMessage.className = 'message-box success';
+      statusMessage.textContent = `✅ Query executed successfully. Returned ${results[0].values.length} row(s).`;
+      resultsTableDiv.innerHTML = renderTable(results[0].columns, results[0].values);
+    }
+
+    generateERD();
+    populateTableList();
+  } catch (err) {
+    statusMessage.className = 'message-box error';
+    statusMessage.textContent = '❌ SQL Error: ' + err.message;
+    console.error("SQL Error:", err);
+  }
+}
+
+/* ------ Table data viewer ------ */
+function populateTableList() {
+  tableListSelect.innerHTML = '<option value="">-- Select Table --</option>';
+  if (!db) return;
+
+  const tableQuery = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
+  try {
+    const result = db.exec(tableQuery);
+    if (result.length > 0 && result[0].values.length > 0) {
+      result[0].values.forEach(row => {
+        const tableName = row[0];
+        const option = document.createElement('option');
+        option.value = tableName;
+        option.textContent = tableName;
+        tableListSelect.appendChild(option);
+      });
+    }
+  } catch (err) {
+    console.error("Error fetching table list:", err);
+  }
+}
+
+function showTableData() {
+  const tableName = tableListSelect.value;
+  if (!tableName) {
+    alert("Please select a table to view its data.");
+    return;
+  }
+  const selectAllQuery = `SELECT * FROM ${tableName};`;
+  queryInput.value = selectAllQuery;
+  executeQuery();
+  tableListSelect.value = '';
+}
+
+/* ------ Query saving/loading ------ */
+function loadSavedQueriesList() {
+  const queries = JSON.parse(localStorage.getItem(QUERY_STORAGE_KEY) || '[]');
+  savedQueriesSelect.innerHTML = '<option value="">-- Select a Query --</option>';
+  queries.forEach((queryObj, index) => {
+    const option = document.createElement('option');
+    option.value = queryObj.script;
+    option.textContent = `[${index + 1}] ${queryObj.name}`;
+    savedQueriesSelect.appendChild(option);
+  });
+}
+function saveQuery() {
+  const script = queryInput.value.trim();
+  if (!script) { alert("The query area is empty."); return; }
+
+  let queries = JSON.parse(localStorage.getItem(QUERY_STORAGE_KEY) || '[]');
+  const queryName = prompt("Enter a name for this SQL query (e.g., 'Full Join'):");
+  if (!queryName) return;
+
+  const newQuery = { name: queryName, script: script };
+  if (queries.some(q => q.script === script)) {
+    alert("This exact query is already saved.");
+    return;
+  }
+  if (queries.length >= MAX_QUERIES) queries.shift();
+  queries.push(newQuery);
+  localStorage.setItem(QUERY_STORAGE_KEY, JSON.stringify(queries));
+  loadSavedQueriesList();
+  alert(`Query "${queryName}" saved successfully! (${queries.length}/${MAX_QUERIES})`);
+}
+function loadQuery(script) {
+  if (script) {
+    queryInput.value = script;
+    savedQueriesSelect.value = '';
+  }
+}
+
+/* ------ Schema saving/loading ------ */
+function loadAllSchemasList() {
+  const savedSchemas = JSON.parse(localStorage.getItem(SCHEMA_STORAGE_KEY) || '[]');
+  const allSchemas = [
+    ...DEFAULT_SCHEMAS.map((s, i) => ({ ...s, valueKey: `DEFAULT-${i}`, isDefault: true })),
+    ...savedSchemas.map((s, i) => ({ ...s, valueKey: `SAVED-${i}`, isDefault: false }))
+  ];
+
+  savedSchemasSelect.innerHTML = '<option value="">-- Select a Schema --</option>';
+  allSchemas.forEach(schemaObj => {
+    const option = document.createElement('option');
+    option.value = schemaObj.script;
+    let label = schemaObj.name;
+    if (!schemaObj.isDefault) label = `[User Saved] ${schemaObj.name}`;
+    option.textContent = label;
+    savedSchemasSelect.appendChild(option);
+  });
+
+  if (firstDefaultSchema) {
+    savedSchemasSelect.value = firstDefaultSchema.script;
+  }
+}
+
+function saveSchema() {
+  const script = dbScriptInput.value.trim();
+  if (!script) {
+    alert("The script area is empty.");
+    return;
+  }
+  let schemas = JSON.parse(localStorage.getItem(SCHEMA_STORAGE_KEY) || '[]');
+  const schemaName = prompt("Enter a name for this database setup (e.g., 'E-commerce Tables'):");
+  if (!schemaName) return;
+  const newSchema = { name: schemaName, script: script };
+  if (schemas.some(s => s.script === script)) {
+    alert("This exact schema script is already saved.");
+    return;
+  }
+  if (schemas.length >= MAX_SCHEMAS) schemas.shift();
+  schemas.push(newSchema);
+  localStorage.setItem(SCHEMA_STORAGE_KEY, JSON.stringify(schemas));
+  loadAllSchemasList();
+  alert(`Schema setup "${schemaName}" saved successfully! (${schemas.length}/${MAX_SCHEMAS})`);
+}
+
+function loadSchema(script) {
+  if (!script) return;
+  dbScriptInput.value = script;
+  savedSchemasSelect.value = script;
+
+  const allSchemas = [
+    ...DEFAULT_SCHEMAS,
+    ...JSON.parse(localStorage.getItem(SCHEMA_STORAGE_KEY) || '[]')
+  ];
+  const selectedSchema = allSchemas.find(s => s.script === script);
+  if (selectedSchema && selectedSchema.defaultQuery) {
+    queryInput.value = selectedSchema.defaultQuery;
+  } else {
+    queryInput.value = '';
+  }
+  initDb();
+}
+
+/* ------ ERD generation from live DB ------ */
+function emphasizePkColumns(svgString) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgString, 'image/svg+xml');
+  const textNodes = doc.querySelectorAll('text');
+
+  textNodes.forEach(node => {
+    const txt = (node.textContent || '').trim();
+    if (!/\bPK\b/.test(txt)) return;
+
+    const existingStyle = node.getAttribute('style') || '';
+    let newStyle = existingStyle;
+    if (txt === 'PK') newStyle += ';fill:#d00000;';
+    else if (txt === 'PK,FK' || txt === 'PK FK') newStyle += ';fill:#b00000;';
+    if (!/font-weight\s*:/.test(newStyle)) newStyle += ';font-weight:bold;';
+
+    node.setAttribute('style', newStyle);
+    node.setAttribute('font-weight', 'bold');
+  });
+
+  const serializer = new XMLSerializer();
+  return serializer.serializeToString(doc.documentElement);
+}
+
+async function generateERD() {
+  if (!db) {
+    erdMessage.textContent = 'Database not initialized.';
+    mermaidDiagramDiv.innerHTML = '';
+    return;
+  }
+
+  const tablesResult = db.exec(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+  );
+  if (!tablesResult.length || !tablesResult[0].values.length) {
+    erdMessage.textContent = 'No tables found to generate the ERD.';
+    mermaidDiagramDiv.innerHTML = '';
+    return;
+  }
+
+  const tableNames = tablesResult[0].values.map(row => row[0]);
+  let mermaidSyntax = 'erDiagram\n';
+  const tables = {};
+
+  tableNames.forEach(tableName => {
+    tables[tableName] = { primaryKeys: [], foreignKeys: [], columns: [] };
+    const foreignKeyColumns = [];
+
+    const fk = db.exec(`PRAGMA foreign_key_list(${tableName});`);
+    if (fk.length && fk[0].values.length) {
+      fk[0].values.forEach(row => {
+        const fkColumn = row[3];
+        const refTable = row[2];
+        foreignKeyColumns.push(fkColumn);
+        tables[tableName].foreignKeys.push({ fkColumn, refTable });
+      });
+    }
+
+    const info = db.exec(`PRAGMA table_info(${tableName});`);
+    if (info.length && info[0].values.length) {
+      info[0].values.forEach(col => {
+        const colName = col[1];
+        const colType = col[2] || 'TEXT';
+        const notNull = col[3];
+        const pkFlag = col[5];
+
+        let labelType = colType;
+        if (notNull) labelType += '[NN]';
+
+        const isPk = pkFlag > 0;
+        const isFk = foreignKeyColumns.includes(colName);
+
+        tables[tableName].columns.push({
+          name: colName,
+          type: labelType,
+          isPk,
+          isFk
+        });
+
+        if (isPk) tables[tableName].primaryKeys.push(colName);
+      });
+    }
+  });
+
+  for (const [tableName, data] of Object.entries(tables)) {
+    mermaidSyntax += `    ${refactorTableName(tableName)} {\n`;
+    data.columns.forEach(col => {
+      let line = `        ${col.name} ${col.type}`;
+      const keyMarkers = [];
+      if (col.isPk) keyMarkers.push('PK');
+      if (col.isFk) keyMarkers.push('FK');
+      if (keyMarkers.length > 0) line += ' ' + keyMarkers.join(',');
+      mermaidSyntax += line + '\n';
+    });
+    mermaidSyntax += `    }\n`;
+
+    data.foreignKeys.forEach(fk => {
+      mermaidSyntax += `    ${refactorTableName(fk.refTable)} ||--o{ ${refactorTableName(tableName)} : "${fk.fkColumn}"\n`;
+    });
+  }
+
+  erdMessage.textContent = 'Rendering Diagram...';
+  mermaidDiagramDiv.innerHTML = '';
+  try {
+    const { svg } = await mermaid.render('mermaid-svg', mermaidSyntax);
+    const styledSvg = emphasizePkColumns(svg);
+    mermaidDiagramDiv.innerHTML = styledSvg;
+    erdMessage.textContent = 'Diagram generated successfully.';
+  } catch (error) {
+    console.error('Mermaid ERD generation failed:', error, '\nMermaid code:\n', mermaidSyntax);
+    erdMessage.textContent = '❌ Failed to generate ERD.';
+    mermaidDiagramDiv.innerHTML = '';
+  }
+}
+
+function refactorTableName(name) {
+  return name.replace(/"/g, '').replace(/`/g, '');
+}
+
+function renderTable(columns, rows) {
+  let html = '<table><thead><tr>';
+  columns.forEach(col => { html += `<th>${col}</th>`; });
+  html += '</tr></thead><tbody>';
+  rows.forEach(row => {
+    html += '<tr>';
+    row.forEach(cell => { html += `<td>${cell === null ? 'NULL' : cell}</td>`; });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+</script>
+
+</body>
+</html>
