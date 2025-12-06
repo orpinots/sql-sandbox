@@ -1795,9 +1795,8 @@ async function buildSchema() {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
-        // if you later add an API key, you'd include it here
       },
-      body: JSON.stringify(erdPayload)
+      body: JSON.stringify(erd)      // <-- use the global ERD object
     });
 
     if (!resp.ok) {
