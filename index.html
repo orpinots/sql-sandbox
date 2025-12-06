@@ -429,6 +429,17 @@
   <button class="primary" onclick="buildSchema()">Build Schema from ERD</button>
   <button id="toggleAttrViewBtn" onclick="toggleAttrView()">Attributes: In Box</button>
   <button onclick="openMermaidPreview()">Open Mermaid Preview</button>
+
+  <!-- New preset picker -->
+  <label style="margin-left:16px; font-size:14px;">
+    Sample ERD:
+    <select id="erdPresetSelect" onchange="switchErdPreset(this.value)">
+      <option value="fourWay">4-Way Registration (default)</option>
+      <option value="twoBinary">Student–Registration–Course (binary rel.)</option>
+      <option value="blank">Blank ERD</option>
+    </select>
+  </label>
+
 </div>
 
 <div id="layout" style="display:block;">
@@ -635,7 +646,152 @@ const INITIAL_ERD = {
   ]
 };
 
-let erd = JSON.parse(JSON.stringify(INITIAL_ERD));
+// Small helper to deep-clone our ERD objects
+function cloneErd(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+// All sample ERDs live here
+const ERD_PRESETS = {
+  // Simple 3 entities with 2 relationships 
+  twoBinary: {
+    label: "Student–Registration–Course (binary)",
+    data: {
+      entities: [
+        { id:"student", name:"Student", x:60,  y:180, attributes:[
+          { name:"SSN", pk:true }, { name:"Name", pk:false }
+        ]},
+        { id:"registration", name:"Registration", x:360,y:180, attributes:[
+          { name:"SSN", pk:true }, { name:"CRN", pk:true }
+        ]},
+        { id:"course", name:"Course", x:660,y:180, attributes:[
+          { name:"CRN", pk:true }, { name:"CourseName", pk:false }
+        ]}
+      ],
+      relationships: [
+        {
+          id: "r1",
+          name: "signsup",
+          type: "1:N",
+          a: "student",
+          b: "registration",
+          optA: false,
+          optB: true
+        },
+        {
+          id: "r2",
+          name: "has",
+          type: "1:N",
+          a: "course",
+          b: "registration",
+          optA: false,
+          optB: true
+        }
+      ]
+    }
+  },
+  fourWay: {
+    label: "4-Way teaches example",
+    data: {
+      entities: [
+        {
+          id: "student",
+          name: "Student",
+          x: 80,
+          y: 220,
+          attributes: [
+            { name: "SSN",  pk: true },
+            { name: "Name", pk: false }
+          ]
+        },
+        {
+          id: "courseSection",
+          name: "CourseSection",
+          x: 420,
+          y: 120,
+          attributes: [
+            { name: "CRN",        pk: true },
+            { name: "CourseName", pk: false }
+          ]
+        },
+        {
+          id: "instructor",
+          name: "Instructor",
+          x: 420,
+          y: 320,
+          attributes: [
+            // you didn’t have columns here in SQL, so we keep it minimal
+            { name: "InstrID", pk: true }
+          ]
+        },
+        {
+          id: "building",
+          name: "Building",
+          x: 760,
+          y: 200,
+          attributes: [
+            { name: "BuidingID", pk: true }   // keep your typo so SQL matches
+          ]
+        },
+        {
+          id: "buildingRoom",
+          name: "BuildingRoom",
+          x: 760,
+          y: 360,
+          isWeak: true,
+          attributes: [
+            { name: "BuidingID", pk: true, fk: true },
+            { name: "RoomNum",   pk: true }
+          ]
+        }
+      ],
+
+      relationships: [
+        // Identifying 1:N between Building and BuildingRoom
+        {
+          id: "rRooms",
+          name: "hasRoom",
+          type: "1:N",
+          a: "building",
+          b: "buildingRoom",
+          optA: false,
+          optB: false,
+          identifying: true,
+          parentSide: "a"
+        },
+
+        // 4-way n-ary teaches: Student, CourseSection, Instructor, BuildingRoom
+        {
+          id: "rTeach",
+          name: "teaches",
+          type: "N:N",          // for n-ary we treat all ends as “many”
+          a: "student",
+          b: "courseSection",
+          optA: false,
+          optB: false,
+          extras: ["instructor", "buildingRoom"],
+          attributes: []        // add relationship attributes here if you like
+        }
+      ]
+    }
+  },
+  blank: {
+    label: "Blank ERD",
+    data: {
+      entities: [],
+      relationships: []
+    }
+  }
+};
+
+// helper to deep-clone
+function cloneErd(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+// Use the 4-way as the default
+let erd = cloneErd(ERD_PRESETS.fourWay.data);
+
 const wrap = document.getElementById("canvasWrap");
 const svg  = document.getElementById("svgLayer");
 const svgNS = "http://www.w3.org/2000/svg";
@@ -1813,6 +1969,34 @@ async function buildSchema() {
     mermaidOut.value = "erDiagram\n  %% Error building schema on server.";
   }
 }
+
+function switchErdPreset(key) {
+  if (key === "blank") {
+    // Explicitly clear the ERD
+    erd = { entities: [], relationships: [] };
+  } else {
+    const preset = ERD_PRESETS[key];
+    if (!preset) {
+      console.warn("Unknown ERD preset:", key);
+      return;
+    }
+    erd = cloneErd(preset.data);
+  }
+
+  // Re-render canvas
+  render();
+
+  // Optional: reset the text areas so it’s clear the schema is tied to the current ERD
+  document.getElementById("sqlOut").value =
+    "-- Click 'Build Schema from ERD' to regenerate SQL for this ERD.";
+  document.getElementById("mermaidOut").value =
+    "erDiagram\n  %% Click 'Build Schema from ERD' to regenerate ERD text.";
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  const sel = document.getElementById("erdPresetSelect");
+  if (sel) sel.value = "fourWay";   // matches the default we chose above
+});
 
 /* ---------- Draggable modals ---------- */
 function makeModalDraggable(modal) {
