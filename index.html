@@ -445,13 +445,17 @@
   <button onclick="addEntity()">+ Add Entity</button>
   <button class="primary" onclick="buildSchema()">Build Schema from ERD</button>
   <button onclick="loadMermaidToErd()">Load Mermaid→ERD</button>
-  <button id="toggleAttrViewBtn" onclick="toggleAttrView()">Attributes: In Box</button>
   <button onclick="openMermaidPreview()">Open Mermaid Preview</button>
 
   <label style="margin-left: 1rem;">
     <input type="checkbox" id="toggleAssocAsMM" />
     Show associative entities as M:N lines
   </label>
+
+<label style="margin-left: 1rem;">
+  <input type="checkbox" id="toggleAttributeOvals">
+  Show attributes as ovals
+</label>
 
   <!-- Sample ERD preset picker -->
   <label style="margin-left:16px; font-size:14px;">
@@ -1972,8 +1976,15 @@ relCtxMenu.addEventListener("click", e => {
 
 let showAssocAsMM = false;
 
+const toggleAttrCheckbox  = document.getElementById("toggleAttributeOvals");
+const toggleAssocCheckbox = document.getElementById("toggleAssocAsMM");
 
-document.getElementById("toggleAssocAsMM").addEventListener("change", (e) => {
+toggleAttrCheckbox.addEventListener("change", e => {
+  showAttributeOvals = e.target.checked;
+  render();
+});
+
+toggleAssocCheckbox.addEventListener("change", e => {
   showAssocAsMM = e.target.checked;
   render();
 });
