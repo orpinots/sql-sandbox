@@ -1287,30 +1287,33 @@ function drawRelationship(r) {
     svg.appendChild(lineB);
   }
 
-  // A side crow’s-foot / bars
-  if (isManyA) {
-    drawCrowFoot(aEnd.x, aEnd.y, mx, my);
-  } else {
-    drawOuterOneBar(aEnd.x, aEnd.y, mx, my);
-  }
-  // 🔁 use optA instead of r.optA
-  if (optA) {
-    drawInnerCircle(aEnd.x, aEnd.y, mx, my);
-  } else {
-    drawInnerOneBar(aEnd.x, aEnd.y, mx, my);
-  }
+  // A/B side cardinalities
+  // For specialization hierarchies (is-a), Chen notation does NOT show
+  // crow’s feet or 1-bars on any branch, so we skip them entirely.
+  if (!isSpecialization) {
+    // A side
+    if (isManyA) {
+      drawCrowFoot(aEnd.x, aEnd.y, mx, my);
+    } else {
+      drawOuterOneBar(aEnd.x, aEnd.y, mx, my);
+    }
+    if (optA) {
+      drawInnerCircle(aEnd.x, aEnd.y, mx, my);
+    } else {
+      drawInnerOneBar(aEnd.x, aEnd.y, mx, my);
+    }
 
-  // B side
-  if (isManyB) {
-    drawCrowFoot(bEnd.x, bEnd.y, mx, my);
-  } else {
-    drawOuterOneBar(bEnd.x, bEnd.y, mx, my);
-  }
-  // 🔁 use optB instead of r.optB
-  if (optB) {
-    drawInnerCircle(bEnd.x, bEnd.y, mx, my);
-  } else {
-    drawInnerOneBar(bEnd.x, bEnd.y, mx, my);
+    // B side
+    if (isManyB) {
+      drawCrowFoot(bEnd.x, bEnd.y, mx, my);
+    } else {
+      drawOuterOneBar(bEnd.x, bEnd.y, mx, my);
+    }
+    if (optB) {
+      drawInnerCircle(bEnd.x, bEnd.y, mx, my);
+    } else {
+      drawInnerOneBar(bEnd.x, bEnd.y, mx, my);
+    }
   }
 
   // ---- n-ary extras (always many) ----
