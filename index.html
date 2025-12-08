@@ -1375,8 +1375,8 @@ function drawRelationship(r) {
     svg.appendChild(lineExtra);
 
     // 1:1 at the entity side: outer + inner bar
-    drawOuterOneBar(entEnd.x, entEnd.y, mx, my);
-    drawInnerOneBar(entEnd.x, entEnd.y, mx, my);
+	// ❌ No Chen cardinality symbols for specialization branches
+	// (do nothing here on purpose)
   });
 
   function drawCircle(radius) {
