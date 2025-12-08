@@ -1164,11 +1164,23 @@ function toggleAttrView() {
 }
 
 // If a relationship has an explicit (x,y), use it.
-// Otherwise, fall back to the midpoint between its two primary entities.
+// Otherwise, fall back to a reasonable default position.
+//
+// 🔁 NEW: if A and B are the *same* entity (unary), their centers
+//        coincide, so place the diamond slightly above that center
+//        instead of at the (degenerate) midpoint.
 function getRelDiamondPosition(rel, axCenter, ayCenter, bxCenter, byCenter) {
   if (typeof rel.x === "number" && typeof rel.y === "number") {
     return { x: rel.x, y: rel.y };
   }
+
+  // Unary (recursive) relationship: A and B are the same entity.
+  if (axCenter === bxCenter && ayCenter === byCenter) {
+    // 40px above the entity center works well visually.
+    return { x: axCenter, y: ayCenter - 40 };
+  }
+
+  // Normal binary case: midpoint between the two entity centers
   return {
     x: (axCenter + bxCenter) / 2,
     y: (ayCenter + byCenter) / 2
@@ -1240,6 +1252,34 @@ function drawRelationship(r) {
   const optA = r.fromAssocCollapse ? true : !!r.optA;
   const optB = r.fromAssocCollapse ? true : !!r.optB;
   const crowMargin = 0.5;
+
+  // ---- detect unary (recursive) relationship ----
+  // Unary means: same entity on both sides, not n-ary, not specialization.
+  const isUnary =
+    !isNAry &&
+    !isSpecialization &&
+    a.id === b.id;
+
+  // ---- diamond position (possibly user-dragged) ----
+  // getRelDiamondPosition already has a unary special-case for coincident centers.
+  const pos = getRelDiamondPosition(r, axCenter, ayCenter, bxCenter, byCenter);
+  const mx  = pos.x;
+  const my  = pos.y;
+
+  // ---- connect diamond to A & B ----
+  let aEnd, bEnd;
+  if (isUnary) {
+    // Unary: both legs attach to the SAME entity box.
+    // We take two points along the top edge of the box, left and right of center.
+    const topY = a.y;  // y of the top edge of the EMPLOYEE box
+    const offsetX = aHalfW * 0.35; // 35% of half-width left/right
+	aEnd = { x: axCenter - offsetX, y: topY }; // "A" side attachment
+	bEnd = { x: axCenter + offsetX, y: topY }; // "B" side attachment
+  } else {
+    // Normal binary / n-ary: project toward the diamond from each entity.
+    aEnd = edgePoint(axCenter, ayCenter, mx, my, aHalfW, aHalfH, isManyA ? crowMargin : 0);
+    bEnd = edgePoint(bxCenter, byCenter, mx, my, bHalfW, bHalfH, isManyB ? crowMargin : 0);
+  }
 
   // ---- diamond position (possibly user-dragged) ----
   const pos = getRelDiamondPosition(r, axCenter, ayCenter, bxCenter, byCenter);
