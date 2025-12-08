@@ -448,6 +448,11 @@
   <button id="toggleAttrViewBtn" onclick="toggleAttrView()">Attributes: In Box</button>
   <button onclick="openMermaidPreview()">Open Mermaid Preview</button>
 
+  <label style="margin-left: 1rem;">
+    <input type="checkbox" id="toggleAssocAsMM" />
+    Show associative entities as M:N lines
+  </label>
+
   <!-- Sample ERD preset picker -->
   <label style="margin-left:16px; font-size:14px;">
     Sample ERD:
@@ -974,12 +979,81 @@ function autoMarkAssociativeEntities(erdObj) {
 
 /* ---------- RENDER ---------- */
 function render() {
-//  autoMarkAssociativeEntities(erd);   // ✅ NEW
+  // autoMarkAssociativeEntities(erd);   // now handled in schemaEngine
   wrap.querySelectorAll(".entity, .rel-hit, .attr-hit").forEach(e => e.remove());
   svg.innerHTML = "";
 
+  if (!erd || !erd.entities || !erd.relationships) return;
 
-  erd.entities.forEach(ent => {
+  const entities       = erd.entities || [];
+  const relationships  = erd.relationships || [];
+
+  // By default we just use the real ERD
+  let viewEntities      = entities;
+  let viewRelationships = relationships;
+
+  // --------- Optional view: show associative entities as M:N lines ---------
+  if (showAssocAsMM) {
+    const relsByEntity = {};
+
+    // Build adjacency list for relationships
+    (relationships || []).forEach(r => {
+      [r.a, r.b].forEach(id => {
+        if (!id) return;
+        if (!relsByEntity[id]) relsByEntity[id] = [];
+        relsByEntity[id].push(r);
+      });
+    });
+
+    const assocMap = new Map(); // ent.id -> { aId, bId, label }
+
+    // Identify associative entities that hook exactly two parents
+    (entities || []).forEach(ent => {
+      if (!ent.isAssociative) return;
+
+      const rels = relsByEntity[ent.id] || [];
+      if (rels.length !== 2) return;
+
+      const [r1, r2] = rels;
+      const other1 = (r1.a === ent.id) ? r1.b : r1.a;
+      const other2 = (r2.a === ent.id) ? r2.b : r2.a;
+
+      if (!other1 || !other2 || other1 === other2) return;
+
+      const label = ent.name || r1.name || r2.name || "";
+      assocMap.set(ent.id, { aId: other1, bId: other2, label });
+    });
+
+    const assocIds = new Set(assocMap.keys());
+
+    // 1) Hide associative entities themselves
+    viewEntities = (entities || []).filter(e => !assocIds.has(e.id));
+
+    // 2) Remove relationships that touch those associative entities
+    const baseRels = (relationships || []).filter(r => {
+      return !assocIds.has(r.a) && !assocIds.has(r.b);
+    });
+
+    // 3) Add synthetic N:N relationships between the parent entities
+    const extraRels = [];
+    assocMap.forEach(({ aId, bId, label }) => {
+      extraRels.push({
+        id: "assocView_" + Math.random().toString(36).slice(2, 7),
+        name: label,
+        type: "N:N",
+        a: aId,
+        b: bId,
+        optA: false,
+        optB: false,
+        extras: []
+      });
+    });
+
+    viewRelationships = baseRels.concat(extraRels);
+  }
+
+  // --------- Draw entities (from the view) ----------
+  viewEntities.forEach(ent => {
     const d = document.createElement("div");
 
     d.className = "entity";
@@ -997,15 +1071,17 @@ function render() {
     if (showAttributeOvals) {
       contentHtml = `<div style="${textStyle}"><b>${ent.name}</b></div>`;
     } else {
-      contentHtml = `<div style="${textStyle}"><b>${ent.name}</b><br>` +
-        ent.attributes
+      contentHtml =
+        `<div style="${textStyle}"><b>${ent.name}</b><br>` +
+        (ent.attributes || [])
           .map(a => getAttrLabel(a, false))
-          .join("<br>") + "</div>";
+          .join("<br>") +
+        "</div>";
     }
 
     // 2. If Associative, inject the SVG Diamond Outline BEHIND the text
-    // fill="none" ensures the entity's standard background color is visible
-    if (ent.isAssociative) {
+    // Only when we are *not* collapsing them into M:N lines
+    if (ent.isAssociative && !showAssocAsMM) {
       contentHtml += `
         <svg xmlns="http://www.w3.org/2000/svg" 
              width="100%" height="100%" 
@@ -1031,10 +1107,12 @@ function render() {
     ent.height = d.offsetHeight;
   });
 
-  erd.relationships.forEach(r => drawRelationship(r));
+  // --------- Draw relationships (from the view) ----------
+  viewRelationships.forEach(r => drawRelationship(r));
 
+  // --------- Attribute ovals, if enabled ----------
   if (showAttributeOvals) {
-    erd.entities.forEach(ent => drawAttributeOvalsForEntity(ent));
+    viewEntities.forEach(ent => drawAttributeOvalsForEntity(ent));
   }
 }
 
@@ -1864,6 +1942,7 @@ ctxMenu.addEventListener("click", e => {
   }
 });
 
+
 /* Relationship menu actions */
 relCtxMenu.addEventListener("click", e => {
   const act = e.target.dataset.act;
@@ -1891,6 +1970,15 @@ relCtxMenu.addEventListener("click", e => {
   }
 });
 
+let showAssocAsMM = false;
+
+
+document.getElementById("toggleAssocAsMM").addEventListener("change", (e) => {
+  showAssocAsMM = e.target.checked;
+  render();
+});
+
+
 /* ---------- Entity modal ---------- */
 function openEntityModal(ent) {
   editingEntityId = ent.id;
@@ -1915,10 +2003,14 @@ function openEntityModal(ent) {
 
   entityModal.classList.add("show");
 }
+
+
 function closeEntityModal() {
   editingEntityId = null;
   entityModal.classList.remove("show");
 }
+
+
 function addAttrRow() {
   const tr = document.createElement("tr");
   tr.innerHTML = `
