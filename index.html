@@ -885,8 +885,17 @@ const ERD_PRESETS = {
   }
 };
 
+function findRelationshipById(relId) {
+  if (!relId || !erd) return null;
 
+  // 1) real relationships in the ERD
+  const base = (erd.relationships || []).find(r => r.id === relId);
+  if (base) return base;
 
+  // 2) synthetic "view" relationships (assoc → M:N, n-ary view, etc.)
+  const view = (erd._viewRelationships || []).find(r => r.id === relId);
+  return view || null;
+}
 
 
 // helper to deep-clone
@@ -1125,6 +1134,7 @@ function render() {
   });
 
   // --------- Draw relationships (from the view) ----------
+  erd._viewRelationships = viewRelationships;
   viewRelationships.forEach(r => drawRelationship(r));
 
   // --------- Attribute ovals, if enabled ----------
@@ -1718,10 +1728,10 @@ function enableRelDrag(hitEl) {
     e.preventDefault();
     e.stopPropagation();
 
-    const relId = hitEl.dataset.rid;
-    const rel   = erd.relationships.find(r => r.id === relId);
-    if (!rel) return;
-
+	const rid = hit.dataset.rid;
+	const rel = findRelationshipById(rid);
+	if (!rel) return;
+	
     const rect = wrap.getBoundingClientRect();
     const startMouseX = e.clientX - rect.left;
     const startMouseY = e.clientY - rect.top;
