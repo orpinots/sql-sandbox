@@ -1198,6 +1198,13 @@ function drawRelationship(r) {
   const isManyA = isNAry ? true : /[NM]/.test(leftCard);
   const isManyB = isNAry ? true : /[NM]/.test(rightCard);
 
+  // 🔍 NEW: effective min-cardinality flags used for drawing inner symbols
+  // When we are *collapsing associative entities* into M:N lines, we do not
+  // know the min-participation semantics at each end, so show 0..N on both
+  // sides (inner "O") rather than 1..N.
+  const optA = (showAssocAsMM && isManyA && isManyB) ? true : !!r.optA;
+  const optB = (showAssocAsMM && isManyA && isManyB) ? true : !!r.optB;
+
   const crowMargin = 0.5;
 
   // ---- diamond position (possibly user-dragged) ----
@@ -1252,7 +1259,8 @@ function drawRelationship(r) {
   } else {
     drawOuterOneBar(aEnd.x, aEnd.y, mx, my);
   }
-  if (r.optA) {
+  // 🔁 use optA instead of r.optA
+  if (optA) {
     drawInnerCircle(aEnd.x, aEnd.y, mx, my);
   } else {
     drawInnerOneBar(aEnd.x, aEnd.y, mx, my);
@@ -1264,7 +1272,8 @@ function drawRelationship(r) {
   } else {
     drawOuterOneBar(bEnd.x, bEnd.y, mx, my);
   }
-  if (r.optB) {
+  // 🔁 use optB instead of r.optB
+  if (optB) {
     drawInnerCircle(bEnd.x, bEnd.y, mx, my);
   } else {
     drawInnerOneBar(bEnd.x, bEnd.y, mx, my);
