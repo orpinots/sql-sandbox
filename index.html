@@ -1728,9 +1728,9 @@ function enableRelDrag(hitEl) {
     e.preventDefault();
     e.stopPropagation();
 
-	const rid = hit.dataset.rid;
-	const rel = findRelationshipById(rid);
-	if (!rel) return;
+    const rid = hitEl.dataset.rid;          // 👈 use hitEl, not hit
+    const rel = findRelationshipById(rid);  // 👈 will now work for synthetic rels too
+    if (!rel) return;
 	
     const rect = wrap.getBoundingClientRect();
     const startMouseX = e.clientX - rect.left;
