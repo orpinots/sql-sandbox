@@ -981,6 +981,71 @@ function autoMarkAssociativeEntities(erdObj) {
   });
 }
 
+// Build a "view" relationship list when we are collapsing associative entities
+// into M:N / n-ary relationships. Returns:
+//   { relationships: [...], hiddenAssocIds: Set<string> }
+function buildViewRelationships(erd) {
+  const entities      = erd.entities || [];
+  const relationships = erd.relationships || [];
+
+  // Build adjacency: which relationships touch each entity?
+  const relsByEntity = new Map();
+  relationships.forEach(r => {
+    [r.a, r.b].forEach(id => {
+      if (!id) return;
+      if (!relsByEntity.has(id)) relsByEntity.set(id, []);
+      relsByEntity.get(id).push(r);
+    });
+  });
+
+  const hiddenAssocIds   = new Set(); // associative entities we will not draw
+  const suppressedRelIds = new Set(); // original rels replaced by n-ary ones
+  const synthetic        = [];        // synthetic n-ary relationships we add
+
+  (entities || []).forEach(ent => {
+    if (!ent.isAssociative) return;
+
+    const rels = relsByEntity.get(ent.id) || [];
+    if (rels.length < 2) return; // need at least two parents to be worth collapsing
+
+    // Collect distinct neighboring entity IDs
+    const neighborIds = new Set();
+    rels.forEach(r => {
+      const other = (r.a === ent.id) ? r.b : r.a;
+      if (other) neighborIds.add(other);
+      suppressedRelIds.add(r.id); // this original rel will be replaced
+    });
+
+    const ids = Array.from(neighborIds);
+    if (ids.length < 2) return; // must connect to at least two distinct parents
+
+    hiddenAssocIds.add(ent.id);
+
+    const [idA, idB, ...extraIds] = ids;
+    const label = ent.name || (rels[0] && rels[0].name) || "";
+
+    synthetic.push({
+      id: "assocView_" + ent.id + "_" + Math.random().toString(36).slice(2, 7),
+      name: label,
+      type: "N:N",               // base ends: many
+      a: idA,
+      b: idB,
+      optA: true,                // 0..N (inner O) at both base ends
+      optB: true,
+      extras: extraIds,          // any 3rd/4th/... parent becomes n-ary "extra"
+      fromAssocCollapse: true    // flag so drawRelationship can tweak symbols
+    });
+  });
+
+  // Keep all original relationships that were not collapsed
+  const baseRels = relationships.filter(r => !suppressedRelIds.has(r.id));
+
+  return {
+    relationships: baseRels.concat(synthetic),
+    hiddenAssocIds
+  };
+}
+
 /* ---------- RENDER ---------- */
 function render() {
   // autoMarkAssociativeEntities(erd);   // now handled in schemaEngine
@@ -989,71 +1054,19 @@ function render() {
 
   if (!erd || !erd.entities || !erd.relationships) return;
 
-  const entities       = erd.entities || [];
-  const relationships  = erd.relationships || [];
+  const entities      = erd.entities || [];
+  const relationships = erd.relationships || [];
 
   // By default we just use the real ERD
   let viewEntities      = entities;
   let viewRelationships = relationships;
 
-  // --------- Optional view: show associative entities as M:N lines ---------
+  // --------- Optional view: collapse associative entities into M:N / n-ary lines ---------
   if (showAssocAsMM) {
-    const relsByEntity = {};
-
-    // Build adjacency list for relationships
-    (relationships || []).forEach(r => {
-      [r.a, r.b].forEach(id => {
-        if (!id) return;
-        if (!relsByEntity[id]) relsByEntity[id] = [];
-        relsByEntity[id].push(r);
-      });
-    });
-
-    const assocMap = new Map(); // ent.id -> { aId, bId, label }
-
-    // Identify associative entities that hook exactly two parents
-    (entities || []).forEach(ent => {
-      if (!ent.isAssociative) return;
-
-      const rels = relsByEntity[ent.id] || [];
-      if (rels.length !== 2) return;
-
-      const [r1, r2] = rels;
-      const other1 = (r1.a === ent.id) ? r1.b : r1.a;
-      const other2 = (r2.a === ent.id) ? r2.b : r2.a;
-
-      if (!other1 || !other2 || other1 === other2) return;
-
-      const label = ent.name || r1.name || r2.name || "";
-      assocMap.set(ent.id, { aId: other1, bId: other2, label });
-    });
-
-    const assocIds = new Set(assocMap.keys());
-
-    // 1) Hide associative entities themselves
-    viewEntities = (entities || []).filter(e => !assocIds.has(e.id));
-
-    // 2) Remove relationships that touch those associative entities
-    const baseRels = (relationships || []).filter(r => {
-      return !assocIds.has(r.a) && !assocIds.has(r.b);
-    });
-
-    // 3) Add synthetic N:N relationships between the parent entities
-    const extraRels = [];
-    assocMap.forEach(({ aId, bId, label }) => {
-      extraRels.push({
-        id: "assocView_" + Math.random().toString(36).slice(2, 7),
-        name: label,
-        type: "N:N",
-        a: aId,
-        b: bId,
-        optA: false,
-        optB: false,
-        extras: []
-      });
-    });
-
-    viewRelationships = baseRels.concat(extraRels);
+    const view = buildViewRelationships(erd);
+    viewRelationships = view.relationships;
+    const hiddenAssocIds = view.hiddenAssocIds || new Set();
+    viewEntities = entities.filter(e => !hiddenAssocIds.has(e.id));
   }
 
   // --------- Draw entities (from the view) ----------
@@ -1084,7 +1097,7 @@ function render() {
     }
 
     // 2. If Associative, inject the SVG Diamond Outline BEHIND the text
-    // Only when we are *not* collapsing them into M:N lines
+    // Only when we are *not* collapsing them into M:N / n-ary lines
     if (ent.isAssociative && !showAssocAsMM) {
       contentHtml += `
         <svg xmlns="http://www.w3.org/2000/svg" 
@@ -1198,13 +1211,11 @@ function drawRelationship(r) {
   const isManyA = isNAry ? true : /[NM]/.test(leftCard);
   const isManyB = isNAry ? true : /[NM]/.test(rightCard);
 
-  // 🔍 NEW: effective min-cardinality flags used for drawing inner symbols
-  // When we are *collapsing associative entities* into M:N lines, we do not
-  // know the min-participation semantics at each end, so show 0..N on both
-  // sides (inner "O") rather than 1..N.
-  const optA = (showAssocAsMM && isManyA && isManyB) ? true : !!r.optA;
-  const optB = (showAssocAsMM && isManyA && isManyB) ? true : !!r.optB;
-
+  // Effective min-cardinality flags used for drawing inner symbols.
+  // For relationships synthesized from collapsing an associative entity,
+  // we *only* know they are "0..N" on each side, so force optA/optB = true.
+  const optA = r.fromAssocCollapse ? true : !!r.optA;
+  const optB = r.fromAssocCollapse ? true : !!r.optB;
   const crowMargin = 0.5;
 
   // ---- diamond position (possibly user-dragged) ----
@@ -1306,8 +1317,15 @@ function drawRelationship(r) {
     // max multiplicity = Many (crow's foot at entity side)
     drawCrowFoot(entEnd.x, entEnd.y, mx, my);
 
-    // ✅ min multiplicity = 1 (inner bar at entity side)
-    drawInnerOneBar(entEnd.x, entEnd.y, mx, my);
+    // Min multiplicity:
+    // • Normal n-ary relationships: 1..N  → inner bar
+    // • Collapsed associative n-ary: 0..N → inner circle
+    if (r.fromAssocCollapse) {
+      drawInnerCircle(entEnd.x, entEnd.y, mx, my);
+    } else {
+      drawInnerOneBar(entEnd.x, entEnd.y, mx, my);
+    }
+
   });
   
   // ---- specialization extras (all 1:1) ----
