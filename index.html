@@ -1780,12 +1780,20 @@ function enableRelDrag(hitEl) {
       rel.y = newY;
 
       // 🔹 If this is a synthetic "assocView_*" relationship,
-      //     also persist its position on the underlying associative entity
+      //    also persist its position on the underlying associative entity
       if (rel.synthetic && rel.assocEntityId) {
         const src = erd.entities.find(en => en.id === rel.assocEntityId);
         if (src) {
+          // Remember diamond center for when we rebuild synthetic rels
           src.assocRelX = newX;
           src.assocRelY = newY;
+
+          // 🔹 NEW: move the *entity* so that when we toggle back,
+          //         the associative entity appears where this diamond is now.
+          const w = src.width  || 140;
+          const h = src.height ||  60;
+          src.x = newX - w / 2;
+          src.y = newY - h / 2;
         }
       }
 
