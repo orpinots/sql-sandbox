@@ -1009,23 +1009,23 @@ function autoMarkAssociativeEntities(erdObj) {
   });
 }
 
-// Build a "view" relationship list when we are collapsing associative entities
-// into M:N / n-ary relationships. Returns:
-//   { relationships: [...], hiddenAssocIds: Set<string> }
+// Build the "view" ERD used by render(), optionally collapsing
+// associative entities into M:N (or n-ary) relationship diamonds.
 function buildViewRelationships(erd, showAssocAsMM) {
   const entities      = erd.entities || [];
   const relationships = erd.relationships || [];
 
-  // Default view: no collapsing, just return originals
+  // No special view: just return the raw ERD.
   if (!showAssocAsMM) {
-    const viewEntities      = entities;
-    const viewRelationships = relationships;
-    erd._viewRelationships  = viewRelationships;
-    return { viewEntities, viewRelationships };
+    return {
+      viewEntities: entities,
+      viewRelationships: relationships
+    };
   }
 
-  // ---------- Build adjacency: which relationships touch which entities ----------
-  const relsByEntity = new Map();
+  // ---------- Build adjacency: which relationships touch each entity? ----------
+  const relsByEntity = new Map();  // entId -> [relationships]
+
   (relationships || []).forEach(r => {
     const ids = [r.a, r.b, ...(r.extras || [])];
     ids.forEach(id => {
@@ -1035,66 +1035,71 @@ function buildViewRelationships(erd, showAssocAsMM) {
     });
   });
 
-  const assocIds   = new Set();   // ids of associative entities we hide in this view
-  const synthetic  = [];          // synthetic M:N (or n-ary) relationships we create
+  const assocIds   = new Set();  // entities we will hide
+  const extraRels  = [];         // synthetic relationships we will add
 
-  (entities || []).forEach(ent => {
+  // ---------- For each associative entity, build a synthetic relationship ----------
+  entities.forEach(ent => {
     if (!ent.isAssociative) return;
 
-    const rels = relsByEntity.get(ent.id) || [];
-    if (!rels.length) return;
+    const incident = relsByEntity.get(ent.id) || [];
+    if (!incident.length) return;
 
-    // Collect all distinct neighbor entities (excluding the associative entity itself)
-    const neighborIdsSet = new Set();
-    rels.forEach(r => {
+    // Collect distinct neighbor entity IDs (all participants except the assoc entity)
+    const neighborIds = new Set();
+    incident.forEach(r => {
       [r.a, r.b, ...(r.extras || [])].forEach(id => {
-        if (id && id !== ent.id) neighborIdsSet.add(id);
+        if (id && id !== ent.id) neighborIds.add(id);
       });
     });
 
-    const neighborIds = [...neighborIdsSet];
-    if (neighborIds.length < 2) return;   // need at least 2 parents
+    // Need at least 2 neighbors to form a meaningful relationship
+    if (neighborIds.size < 2) return;
 
-    // For binary associative entities, this yields 2 parents.
-    // For n-ary associative entities, this yields 3+ parents.
-    const [first, ...rest] = neighborIds;
-
-    const syn = {
-      id: "assocView_" + ent.id,
-      name: ent.name || "",
-      type: "N:N",           // A and B are many
-      a: first,
-      b: rest[0],
-      extras: rest.slice(1), // for 3-way, 4-way, ...
-      optA: true,            // we’ll show 0..N via drawRelationship()
-      optB: true,
-      synthetic: true,       // 🔹 mark as synthetic
-      assocEntityId: ent.id  // 🔹 remember which associative entity it came from
-    };
-
-    // 🔹 If the user has previously dragged this diamond, reuse its position
-    if (typeof ent.assocRelX === "number" && typeof ent.assocRelY === "number") {
-      syn.x = ent.assocRelX;
-      syn.y = ent.assocRelY;
-    }
-
-    synthetic.push(syn);
     assocIds.add(ent.id);
+
+    const participants = Array.from(neighborIds);
+    const aId    = participants[0];
+    const bId    = participants[1];
+    const extras = participants.slice(2);
+
+    // ✅ Non-PK attributes of the associative entity become
+    //    relationship attributes (e.g., dosage on PRESCRIPTION).
+    const relAttrs = (ent.attributes || []).filter(a => !a.pk);
+
+    extraRels.push({
+      id: "assocView_" + Math.random().toString(36).slice(2, 7),
+      name: ent.name || "",
+      type: "N:N",            // We treat it as n-ary; extras carries 3rd+ legs
+      a: aId,
+      b: bId,
+      extras,
+
+      // For min-cardinality drawing (0..N on all legs)
+      optA: true,
+      optB: true,
+
+      // 🔑 Carry over the associative attributes (e.g., dosage)
+      attributes: relAttrs,
+
+      // Marker so drawRelationship() can adjust semantics (0..N, etc.)
+      fromAssocCollapse: true,
+
+      // Used by enableRelDrag to push diamond movement back
+      // into the underlying associative entity’s position.
+      assocEntityId: ent.id
+    });
   });
 
-  // Hide associative entities themselves in this view
-  const viewEntities = (entities || []).filter(e => !assocIds.has(e.id));
+  // ---------- Hide associative entities and any relationships that touch them ----------
+  const viewEntities = entities.filter(e => !assocIds.has(e.id));
 
-  // Remove any base relationships that touch those associative entities
-  const baseRels = (relationships || []).filter(r => {
+  const baseRels = relationships.filter(r => {
     const ids = [r.a, r.b, ...(r.extras || [])];
     return !ids.some(id => assocIds.has(id));
   });
 
-  const viewRelationships = baseRels.concat(synthetic);
-
-  // Store the *current* view so dragging code can look up synthetic rels
-  erd._viewRelationships = viewRelationships;
+  const viewRelationships = baseRels.concat(extraRels);
 
   return { viewEntities, viewRelationships };
 }
