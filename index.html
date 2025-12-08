@@ -927,24 +927,42 @@ let showAttributeOvals = false;
 const ERD_STORAGE_KEY = 'erd_canvas_layouts';
 const MAX_ERD_SAVES   = 10;
 
+
 // Build the label for an attribute.
 // inOvals = true  → no [PK]/[FK] tags (ovals view)
 // inOvals = false → include [PK]/[FK] tags (box view)
-function getAttrLabel(attr, inOvals) {
+// isDiscriminator = optional flag for weak partial keys
+function getAttrLabel(attr, inOvals, isDiscriminator = false) {
   const base = attr.name || "";
 
   if (inOvals) {
-    // Ovals mode: cleaner, no PK/FK decorations
+    // ✅ Ovals mode: always clean text, no PK/FK tags ever
     return base;
   }
 
-  // Box mode: show PK/FK tags next to the name
+  // ✅ Box mode: show PK/FK tags next to the name
   const tags = [];
+
   if (attr.pk) tags.push("PK");
   if (attr.fk) tags.push("FK");
+
+  // (Discriminator does NOT affect text here —
+  // it only affects the dashed underline in SVG)
   const suffix = tags.length ? ` [${tags.join(", ")}]` : "";
   return `${base}${suffix}`;
 }
+
+
+function isBorrowedOwnerKey(ent, attr) {
+  // In a weak entity, borrowed owner keys are PK *and* FK
+  return !!(ent.isWeak && attr.pk && attr.fk);
+}
+
+function isDiscriminatorKey(ent, attr) {
+  // In a weak entity, discriminator is PK but *not* FK
+  return !!(ent.isWeak && attr.pk && !attr.fk);
+}
+
 
 /* menus & modals */
 const ctxMenu = document.getElementById("ctxMenu");
@@ -1108,16 +1126,20 @@ function render() {
     const textStyle = "position:relative; z-index:2; pointer-events:none;";
     let contentHtml = "";
 
-    if (showAttributeOvals) {
-      contentHtml = `<div style="${textStyle}"><b>${ent.name}</b></div>`;
-    } else {
-      contentHtml =
-        `<div style="${textStyle}"><b>${ent.name}</b><br>` +
-        (ent.attributes || [])
-          .map(a => getAttrLabel(a, false))
-          .join("<br>") +
-        "</div>";
-    }
+	if (showAttributeOvals) {
+	  contentHtml = `<div style="${textStyle}"><b>${ent.name}</b></div>`;
+	} else {
+	  // For weak entities, hide borrowed owner keys (PK+FK),
+	  // and mark discriminator keys (PK but not FK) for dashed underline.
+	  const visibleAttrs = (ent.attributes || []).filter(a => !isBorrowedOwnerKey(ent, a));
+
+	  contentHtml =
+	    `<div style="${textStyle}"><b>${ent.name}</b><br>` +
+	    visibleAttrs
+	      .map(a => getAttrLabel(a, false, isDiscriminatorKey(ent, a)))
+	      .join("<br>") +
+	    "</div>";
+	}
 
     // 2. If Associative, inject the SVG Diamond Outline BEHIND the text
     // Only when we are *not* collapsing them into M:N lines
@@ -1544,17 +1566,25 @@ function drawAttributeOvalsForEntity(ent) {
   const centerX = ent.x + halfW;
   const centerY = ent.y + halfH;
 
-  const attrs = ent.attributes;
+  const attrs = ent.attributes || [];
   if (!attrs.length) return;
+
+  // For weak entities, hide borrowed owner keys (PK+FK)
+  // but keep discriminator and other attributes.
+  const visible = attrs
+    .map((a, idx) => ({ attr: a, idx }))           // keep original index
+    .filter(({ attr }) => !isBorrowedOwnerKey(ent, attr));
+
+  if (!visible.length) return;
 
   const rx = 40, ry = 16;
   const side = -1;               // left side by default
   const gapFromBox = 40;
   const baseX = centerX + side * (halfW + gapFromBox + rx);
   const verticalSpacing = 40;
-  const baseStartY = centerY - ((attrs.length - 1) * verticalSpacing) / 2;
+  const baseStartY = centerY - ((visible.length - 1) * verticalSpacing) / 2;
 
-  attrs.forEach((a, i) => {
+  visible.forEach(({ attr: a, idx }, i) => {
     const defX = baseX;
     const defY = baseStartY + i * verticalSpacing;
 
@@ -1582,27 +1612,40 @@ function drawAttributeOvalsForEntity(ent) {
     ell.setAttribute("stroke","#222");
     svg.appendChild(ell);
 
-	const text = document.createElementNS(svgNS,"text");
-	text.setAttribute("x", ovalX);
-	text.setAttribute("y", ovalY + 4);
-	text.setAttribute("text-anchor","middle");
-	text.style.fontSize = "12px";
+    const text = document.createElementNS(svgNS,"text");
+    text.setAttribute("x", ovalX);
+    text.setAttribute("y", ovalY + 4);
+    text.setAttribute("text-anchor","middle");
+    text.style.fontSize = "12px";
 
-	// Ovals view: no [PK]/[FK] tags
-	const labelText = getAttrLabel(a, /* inOvals = */ true);
-	text.textContent = labelText;
-	svg.appendChild(text);
-	
+    const isDiscr = isDiscriminatorKey(ent, a);
+
+    // Ovals view: no [PK]/[FK] tags; pass discriminator flag to label helper
+    const labelText = getAttrLabel(a, /* inOvals = */ true, isDiscr);
+    text.textContent = labelText;
+    svg.appendChild(text);
+
+    // Underlines:
+    //  - Strong PKs (or non-weak PKs): solid underline
+    //  - Weak discriminators: dashed underline
+    //  - Borrowed owner keys: already filtered out above
     if (a.pk) {
       text.setAttribute("font-weight","bold");
+
+      const bbox = text.getBBox();
       const underline = document.createElementNS(svgNS,"line");
-	  const bbox = text.getBBox();
-	  underline.setAttribute("x1", bbox.x);
-	  underline.setAttribute("x2", bbox.x + bbox.width);
+      underline.setAttribute("x1", bbox.x);
+      underline.setAttribute("x2", bbox.x + bbox.width);
       underline.setAttribute("y1", ovalY + 7);
       underline.setAttribute("y2", ovalY + 7);
       underline.setAttribute("stroke","#222");
       underline.setAttribute("stroke-width","1");
+
+      if (isDiscr) {
+        // dashed underline for partial key (Chen notation)
+        underline.setAttribute("stroke-dasharray", "3,3");
+      }
+
       svg.appendChild(underline);
     }
 
@@ -1612,7 +1655,8 @@ function drawAttributeOvalsForEntity(ent) {
     hit.style.left = (ovalX - 12) + "px";
     hit.style.top  = (ovalY - 12) + "px";
     hit.dataset.entId = ent.id;
-    hit.dataset.attrIndex = String(i);
+    // Use the ORIGINAL attribute index so editing still maps correctly
+    hit.dataset.attrIndex = String(idx);
     hit.dataset.ovalX = String(ovalX);
     hit.dataset.ovalY = String(ovalY);
     enableEntityAttrDrag(hit);
