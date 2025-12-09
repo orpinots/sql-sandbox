@@ -2397,12 +2397,13 @@ function saveEntityModal() {
 
     const base = { name, type, notNull, unique, pk };
 
-    const old = oldAttrs.find(a => a.name === name);
-    if (old) {
-      if (typeof old.ovalX === "number") base.ovalX = old.ovalX;
-      if (typeof old.ovalY === "number") base.ovalY = old.ovalY;
-    }
-
+	const old = oldAttrs.find(a => a.name === name);
+	if (old) {
+	  if (typeof old.ovalX === "number") base.ovalX = old.ovalX;
+	  if (typeof old.ovalY === "number") base.ovalY = old.ovalY;
+	  if (old.fk) base.fk = true;                         // ✅ preserve FK flag
+	  if (old.references) base.references = old.references; // ✅ preserve FK target
+	}
     newAttrs.push(base);
   });
   
