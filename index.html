@@ -1011,7 +1011,7 @@ function autoMarkAssociativeEntities(erdObj) {
 
 // Build a "view" relationship list when we are collapsing associative entities
 // into M:N / n-ary relationships. Returns:
-//   { viewEntities: [...], viewRelationships: [...] }
+//   { relationships: [...], hiddenAssocIds: Set<string> }
 function buildViewRelationships(erd, showAssocAsMM) {
   const entities      = erd.entities || [];
   const relationships = erd.relationships || [];
@@ -1059,10 +1059,6 @@ function buildViewRelationships(erd, showAssocAsMM) {
     // For n-ary associative entities, this yields 3+ parents.
     const [first, ...rest] = neighborIds;
 
-    // 🔹 Relationship attributes: keep non-PK attributes from the associative entity
-    //    e.g., PRESCRIPTION.dosage, but not doctor_id/patient_id/drug_id PKs.
-    const relAttrs = (ent.attributes || []).filter(a => !a.pk);
-
     const syn = {
       id: "assocView_" + ent.id,
       name: ent.name || "",
@@ -1072,11 +1068,8 @@ function buildViewRelationships(erd, showAssocAsMM) {
       extras: rest.slice(1), // for 3-way, 4-way, ...
       optA: true,            // we’ll show 0..N via drawRelationship()
       optB: true,
-      synthetic: true,       // mark as synthetic
-      assocEntityId: ent.id, // remember which associative entity it came from
-
-      // 🔹 attach relationship attributes so drawRelationship() can render ovals
-      attributes: relAttrs.map(a => ({ ...a }))
+      synthetic: true,       // 🔹 mark as synthetic
+      assocEntityId: ent.id  // 🔹 remember which associative entity it came from
     };
 
     // 🔹 If the user has previously dragged this diamond, reuse its position
