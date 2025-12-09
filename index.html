@@ -1069,10 +1069,25 @@ function buildViewRelationships(erd, showAssocAsMM) {
       optA: true,            // we’ll show 0..N via drawRelationship()
       optB: true,
       synthetic: true,       // 🔹 mark as synthetic
-      assocEntityId: ent.id  // 🔹 remember which associative entity it came from
+      assocEntityId: ent.id,  // 🔹 remember which associative entity it came from
+      fromAssocCollapse: true   // NEW: flag for drawing logic (0..N extras etc.)
     };
 
-    // 🔹 If the user has previously dragged this diamond, reuse its position
+    // 🔹 NEW: treat non-key attributes of the associative entity
+    //         as relationship attributes on the synthetic diamond.
+    //         (Skip PK/FK columns, which are already implied by the legs.)
+    const nonKeyAttrs = (ent.attributes || []).filter(a => !a.pk && !a.fk);
+    if (nonKeyAttrs.length) {
+      syn.attributes = nonKeyAttrs.map(a => ({
+        name: a.name,
+        type: a.type || "TEXT",
+        notNull: !!a.notNull
+        // we deliberately do *not* copy ovalX/ovalY here; we let
+        // drawRelationship choose a default layout around the diamond
+      }));
+    }
+
+    // Preserve prior dragged position of the collapsed diamond, if any
     if (typeof ent.assocRelX === "number" && typeof ent.assocRelY === "number") {
       syn.x = ent.assocRelX;
       syn.y = ent.assocRelY;
