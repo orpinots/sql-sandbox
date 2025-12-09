@@ -1974,9 +1974,26 @@ function enableRelAttrDrag(hitEl) {
 
     const relId = hitEl.dataset.relId;
     const idx   = parseInt(hitEl.dataset.attrIndex, 10);
-    const rel   = erd.relationships.find(r => r.id === relId);
+
+    // 🔹 Use the *current view* relationships if present
+    const relList = erd._viewRelationships || erd.relationships || [];
+    const rel     = relList.find(r => r.id === relId);
+
     if (!rel || !rel.attributes || !rel.attributes[idx]) return;
-    const attr  = rel.attributes[idx];
+    const attr = rel.attributes[idx];
+
+    // 🔹 If this relationship was created by collapsing an associative entity,
+    //     also locate the original attribute on that entity so we can keep
+    //     positions in sync when toggling views.
+    let assocAttr = null;
+    if (rel.fromAssocCollapse && rel.assocEntityId) {
+      const assocEnt = (erd.entities || []).find(e => e.id === rel.assocEntityId);
+      if (assocEnt && assocEnt.attributes) {
+        assocAttr = assocEnt.attributes.find(a =>
+          !a.pk && !a.fk && a.name === attr.name
+        );
+      }
+    }
 
     const rect = wrap.getBoundingClientRect();
     const startMouseX = e.clientX - rect.left;
@@ -1988,16 +2005,29 @@ function enableRelAttrDrag(hitEl) {
     document.onmousemove = ev => {
       const currX = ev.clientX - rect.left;
       const currY = ev.clientY - rect.top;
-      attr.ovalX = startX + (currX - startMouseX);
-      attr.ovalY = startY + (currY - startMouseY);
+
+      const newX = startX + (currX - startMouseX);
+      const newY = startY + (currY - startMouseY);
+
+      // update the view relationship attribute
+      attr.ovalX = newX;
+      attr.ovalY = newY;
+
+      // and, if applicable, the underlying associative-entity attribute
+      if (assocAttr) {
+        assocAttr.ovalX = newX;
+        assocAttr.ovalY = newY;
+      }
+
       render();
     };
+
     document.onmouseup = () => {
       document.onmousemove = null;
+      document.onmouseup = null;
     };
   };
 }
-
 
 /* ---------- Context menus ---------- */
 function enableContext(el){
