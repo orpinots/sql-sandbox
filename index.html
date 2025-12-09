@@ -1079,25 +1079,31 @@ function buildViewRelationships(erd, showAssocAsMM) {
 	//         dragging can persist layout.
 	const nonKeyAttrs = (ent.attributes || []).filter(a => !a.pk && !a.fk);
 	if (nonKeyAttrs.length) {
-	  syn.attributes = nonKeyAttrs.map((a, ix) => ({
-	    name: a.name,
-	    type: a.type || "TEXT",
-	    notNull: !!a.notNull,
-	    // seed from any previously saved layout on the entity attr
-	    ovalX: (typeof a.relOvalX === "number") ? a.relOvalX : undefined,
-	    ovalY: (typeof a.relOvalY === "number") ? a.relOvalY : undefined,
-	    // back-reference so the drag code can find the source attr
-	    _assocEntityId: ent.id,
-	    _assocAttrIndex: ix
-	  }));
-	}
-	
-    // Preserve prior dragged position of the collapsed diamond, if any
-    if (typeof ent.assocRelX === "number" && typeof ent.assocRelY === "number") {
-      syn.x = ent.assocRelX;
-      syn.y = ent.assocRelY;
-    }
+	  syn.attributes = nonKeyAttrs.map(a => {
+	    // index of this attribute in the *entity* definition
+	    const srcIndex = ent.attributes.indexOf(a);
 
+	    const viewAttr = {
+	      name: a.name,
+	      type: a.type || "TEXT",
+	      notNull: !!a.notNull,
+
+	      // so the drag handler knows how to persist back
+	      _assocEntityId: ent.id,
+	      _assocAttrIndex: srcIndex
+	    };
+
+	    // if we’ve previously dragged this, reuse stored coords
+	    if (typeof a.relOvalX === "number") {
+	      viewAttr.ovalX = a.relOvalX;
+	    }
+	    if (typeof a.relOvalY === "number") {
+	      viewAttr.ovalY = a.relOvalY;
+	    }
+
+	    return viewAttr;
+	  });
+	}
     synthetic.push(syn);
     assocIds.add(ent.id);
   });
