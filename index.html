@@ -1073,20 +1073,25 @@ function buildViewRelationships(erd, showAssocAsMM) {
       fromAssocCollapse: true   // NEW: flag for drawing logic (0..N extras etc.)
     };
 
-    // 🔹 NEW: treat non-key attributes of the associative entity
-    //         as relationship attributes on the synthetic diamond.
-    //         (Skip PK/FK columns, which are already implied by the legs.)
-    const nonKeyAttrs = (ent.attributes || []).filter(a => !a.pk && !a.fk);
-    if (nonKeyAttrs.length) {
-      syn.attributes = nonKeyAttrs.map(a => ({
-        name: a.name,
-        type: a.type || "TEXT",
-        notNull: !!a.notNull
-        // we deliberately do *not* copy ovalX/ovalY here; we let
-        // drawRelationship choose a default layout around the diamond
-      }));
-    }
-
+	// 🔹 NEW: treat non-key attributes of the associative entity
+	//         as relationship attributes on the synthetic diamond.
+	//         We also wire them back to the source entity attribute so
+	//         dragging can persist layout.
+	const nonKeyAttrs = (ent.attributes || []).filter(a => !a.pk && !a.fk);
+	if (nonKeyAttrs.length) {
+	  syn.attributes = nonKeyAttrs.map((a, ix) => ({
+	    name: a.name,
+	    type: a.type || "TEXT",
+	    notNull: !!a.notNull,
+	    // seed from any previously saved layout on the entity attr
+	    ovalX: (typeof a.relOvalX === "number") ? a.relOvalX : undefined,
+	    ovalY: (typeof a.relOvalY === "number") ? a.relOvalY : undefined,
+	    // back-reference so the drag code can find the source attr
+	    _assocEntityId: ent.id,
+	    _assocAttrIndex: ix
+	  }));
+	}
+	
     // Preserve prior dragged position of the collapsed diamond, if any
     if (typeof ent.assocRelX === "number" && typeof ent.assocRelY === "number") {
       syn.x = ent.assocRelX;
@@ -1975,27 +1980,14 @@ function enableRelAttrDrag(hitEl) {
     const relId = hitEl.dataset.relId;
     const idx   = parseInt(hitEl.dataset.attrIndex, 10);
 
-    // 🔹 Use the *current view* relationships if present
+    // IMPORTANT: look in the *view* relationships first
     const relList = erd._viewRelationships || erd.relationships || [];
     const rel     = relList.find(r => r.id === relId);
 
     if (!rel || !rel.attributes || !rel.attributes[idx]) return;
     const attr = rel.attributes[idx];
 
-    // 🔹 If this relationship was created by collapsing an associative entity,
-    //     also locate the original attribute on that entity so we can keep
-    //     positions in sync when toggling views.
-    let assocAttr = null;
-    if (rel.fromAssocCollapse && rel.assocEntityId) {
-      const assocEnt = (erd.entities || []).find(e => e.id === rel.assocEntityId);
-      if (assocEnt && assocEnt.attributes) {
-        assocAttr = assocEnt.attributes.find(a =>
-          !a.pk && !a.fk && a.name === attr.name
-        );
-      }
-    }
-
-    const rect = wrap.getBoundingClientRect();
+    const rect        = wrap.getBoundingClientRect();
     const startMouseX = e.clientX - rect.left;
     const startMouseY = e.clientY - rect.top;
 
@@ -2009,14 +2001,22 @@ function enableRelAttrDrag(hitEl) {
       const newX = startX + (currX - startMouseX);
       const newY = startY + (currY - startMouseY);
 
-      // update the view relationship attribute
+      // move the *view* attribute
       attr.ovalX = newX;
       attr.ovalY = newY;
 
-      // and, if applicable, the underlying associative-entity attribute
-      if (assocAttr) {
-        assocAttr.ovalX = newX;
-        assocAttr.ovalY = newY;
+      // If this relationship came from collapsing an associative entity,
+      // also persist coordinates back to the source entity attribute so
+      // we don't lose them when buildViewRelationships() rebuilds.
+      if (rel.fromAssocCollapse && attr._assocEntityId != null) {
+        const assoc = erd.entities.find(e => e.id === attr._assocEntityId);
+        if (assoc && Array.isArray(assoc.attributes)) {
+          const src = assoc.attributes[attr._assocAttrIndex];
+          if (src) {
+            src.relOvalX = newX;
+            src.relOvalY = newY;
+          }
+        }
       }
 
       render();
@@ -2024,10 +2024,10 @@ function enableRelAttrDrag(hitEl) {
 
     document.onmouseup = () => {
       document.onmousemove = null;
-      document.onmouseup = null;
     };
   };
 }
+
 
 /* ---------- Context menus ---------- */
 function enableContext(el){
