@@ -963,6 +963,43 @@ function isDiscriminatorKey(ent, attr) {
   return !!(ent.isWeak && attr.pk && !attr.fk);
 }
 
+// In a specialization hierarchy, hide PKs that are inherited from a supertype.
+// We detect this by:
+//   - a relationship r with specializationExtras (a = supertype);
+//   - ent is either r.b or in r.specializationExtras (subtypes);
+//   - attr.pk is true and its name matches a PK on the supertype.
+function isInheritedPkFromSuper(ent, attr) {
+  if (!attr || !attr.pk || !attr.name) return false;
+  const attrName = attr.name.toLowerCase();
+
+  const rels = erd.relationships || [];
+  for (const r of rels) {
+    const specExtras = r.specializationExtras || [];
+    if (!specExtras.length) continue;
+
+    // supertype = r.a
+    const superEnt = erd.entities.find(e => e.id === r.a);
+    if (!superEnt) continue;
+
+    // is this entity a subtype in this specialization?
+    const isSubtype =
+      ent.id === r.b ||
+      specExtras.includes(ent.id);
+
+    if (!isSubtype) continue;
+
+    const superPkNames = (superEnt.attributes || [])
+      .filter(a => a.pk && a.name)
+      .map(a => a.name.toLowerCase());
+
+    if (superPkNames.includes(attrName)) {
+      return true; // this PK on the subtype is inherited from the supertype
+    }
+  }
+
+  return false;
+}
+
 
 /* menus & modals */
 const ctxMenu = document.getElementById("ctxMenu");
@@ -1157,8 +1194,10 @@ function render() {
 	} else {
 	  // For weak entities, hide borrowed owner keys (PK+FK),
 	  // and mark discriminator keys (PK but not FK) for dashed underline.
-	  const visibleAttrs = (ent.attributes || []).filter(a => !isBorrowedOwnerKey(ent, a));
-
+	  const visibleAttrs = (ent.attributes || []).filter(a =>
+	    !isBorrowedOwnerKey(ent, a) &&
+	    !isInheritedPkFromSuper(ent, a)   // 🔹 hide inherited PKs from supertype
+	  );
 	  contentHtml =
 	    `<div style="${textStyle}"><b>${ent.name}</b><br>` +
 	    visibleAttrs
@@ -1628,13 +1667,14 @@ function drawAttributeOvalsForEntity(ent) {
 
   const attrs = ent.attributes || [];
   if (!attrs.length) return;
-
   // For weak entities, hide borrowed owner keys (PK+FK)
-  // but keep discriminator and other attributes.
+  // and, for specialization subtypes, hide inherited PKs from the supertype.
   const visible = attrs
     .map((a, idx) => ({ attr: a, idx }))           // keep original index
-    .filter(({ attr }) => !isBorrowedOwnerKey(ent, attr));
-
+    .filter(({ attr }) =>
+      !isBorrowedOwnerKey(ent, attr) &&
+      !isInheritedPkFromSuper(ent, attr)           // 🔹 hide inherited PKs
+    );
   if (!visible.length) return;
 
   const rx = 40, ry = 16;
